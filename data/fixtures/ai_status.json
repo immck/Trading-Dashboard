@@ -1,0 +1,1 @@
+{"enabled": true, "configured": false, "provider": "deepseek", "base_url": "https://api.deepseek.com/v1", "model": "deepseek-chat", "has_key": false, "hint": "未配置 API Key。设置环境变量 TD_AI_KEY（可选 TD_AI_BASE / TD_AI_MODEL）后重启服务即可。", "presets": {"deepseek": {"base_url": "https://api.deepseek.com/v1", "model": "deepseek-chat"}}}
