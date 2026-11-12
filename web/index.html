@@ -13,6 +13,10 @@
   <!-- ==================== 顶栏 ==================== -->
   <header class="topbar">
     <div class="brand"><span class="logo-mark">TD</span>多周期看板 <span class="sub">技术分析 · 共振研判</span></div>
+    <div class="tb-group" id="marketGroup">
+      <button class="tb-btn active" data-mkt="crypto">加密</button>
+      <button class="tb-btn" data-mkt="us">美股</button>
+    </div>
     <div class="tb-group" id="symbolGroup"></div>
     <div class="tb-group" id="tfGroup"></div>
     <div class="sym-search">
@@ -55,11 +59,22 @@
     </aside>
 
     <!-- ==================== 中栏：K线 ==================== -->
-    <section class="center">
+    <section class="center" id="centerPane">
 
       <div class="quote-bar" id="quoteBar"></div>
 
+      <div class="center-actions">
+        <button class="btn-ask" id="btnWhatIf" title="根据预估清算分布推算目标价触发风险">目标价推演</button>
+        <button class="btn-ask" id="btnLiqCalc" title="按开仓价、杠杆和维持保证金估算清算价">爆仓价计算</button>
+        <span class="center-actions-spacer"></span>
+        <button class="btn-ask" id="btnToggleGauge" title="收起或展开仪表">收起仪表</button>
+        <button class="btn-ask" id="btnResetChart" title="重置图表缩放">重置图表</button>
+        <button class="btn-ask" id="btnMaxChart" title="最大化或还原K线">最大化图表</button>
+      </div>
+
       <div class="gauge-row" id="gaugeRow"></div>
+
+      <div class="chart-tools" id="chartTools" aria-label="图表工具"></div>
 
       <div class="chart-wrap">
         <div id="mainChart" class="chart-main"></div>
@@ -70,6 +85,7 @@
       </div>
 
       <div class="trend-strip" id="trendStrip"></div>
+      <div class="deriv-strip" id="derivStrip"></div>
 
     </section>
 
@@ -77,16 +93,26 @@
     <aside class="right">
 
       <div class="panel">
-        <div class="panel-title">全网量能 <span class="legend" id="volLegend"></span></div>
+        <div class="panel-title">全网量能 <span class="legend" id="volLegend"></span><button class="mini panel-detail" data-detail="volume">详情</button></div>
         <div class="vol-summary" id="volSummary"></div>
+        <div class="side-tabs" id="venueFilter">
+          <button class="ptab active" data-market-filter="all">全部</button>
+          <button class="ptab" data-market-filter="spot">现货</button>
+          <button class="ptab" data-market-filter="futures">合约</button>
+        </div>
         <table class="tbl" id="venueTable">
-          <thead><tr><th>交易所</th><th>最新</th><th>涨跌</th><th>24h量</th><th>OI</th><th>费率</th></tr></thead>
+          <thead><tr><th>交易所</th><th>类型</th><th>最新</th><th>涨跌</th><th>24h量</th><th>OI</th><th>费率</th></tr></thead>
           <tbody></tbody>
         </table>
       </div>
 
       <div class="panel">
-        <div class="panel-title">挂单墙（分层）
+        <div class="panel-title">资金费率榜 <span class="legend">年化估算 · 仅展示有源数据</span></div>
+        <div id="fundingPanel"></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title">挂单墙（分层） <button class="mini panel-detail" data-detail="walls">详情</button>
           <span class="panel-tabs" id="wallTabs">
             <button class="ptab active" data-tier="near">近距</button>
             <button class="ptab" data-tier="mid">中距</button>
@@ -98,6 +124,11 @@
           <thead><tr><th>价格</th><th>总额</th><th>距离</th><th>方向</th></tr></thead>
           <tbody></tbody>
         </table>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title">挂单大单 <span class="legend">当前盘口快照 · ≥$50K</span></div>
+        <div id="largeOrders"></div>
       </div>
 
       <div class="panel">
@@ -130,6 +161,22 @@
 
     </aside>
   </div>
+
+  <!-- ==================== 底部：实时快讯 ==================== -->
+  <footer class="news-dock" id="newsDock">
+    <div class="nd-head">
+      <span class="nd-title">实时快讯</span>
+      <span class="nd-tabs" id="newsTabs">
+        <button class="nd-tab active" data-tag="all">全部</button>
+        <button class="nd-tab" data-tag="crypto">加密</button>
+        <button class="nd-tab" data-tag="stock">美股</button>
+        <button class="nd-tab" data-tag="macro">宏观</button>
+      </span>
+      <span class="muted" id="newsMeta"></span>
+      <button class="mini" id="newsToggle">收起</button>
+    </div>
+    <div class="nd-body" id="newsBody"></div>
+  </footer>
 </div>
 
 <!-- ==================== 研判弹窗 ==================== -->
@@ -179,6 +226,17 @@
       </span>
     </div>
     <div class="modal-body" id="btBody"><div class="empty">载入中…</div></div>
+  </div>
+</div>
+
+<!-- ==================== 风险计算工具 ==================== -->
+<div id="toolModal" class="modal" hidden>
+  <div class="modal-box tool-modal-box">
+    <div class="modal-head">
+      <b id="toolTitle">风险计算</b>
+      <span class="bt-tools"><button class="btn-ask" id="toolClose">关闭</button></span>
+    </div>
+    <div class="modal-body" id="toolBody"></div>
   </div>
 </div>
 

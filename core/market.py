@@ -311,8 +311,54 @@ def fear_greed() -> dict:
     return {}
 
 
+def _snapshot_us(sym: str) -> dict:
+    """美股快照：只有价格/量能，没有持仓量、资金费率、盘口墙、清算这些加密概念。"""
+    import time
+    from . import usstock
+
+    q = usstock.quote(sym)
+    vol_ratio = None
+    try:
+        bars = usstock.klines(sym, "1d", want=30)
+        vols = bars["volume"]
+        if len(vols) >= 21:
+            avg = float(np.mean(vols[-21:-1]))
+            if avg > 0:
+                vol_ratio = _r(float(vols[-1]) / avg, 3)
+    except Exception:  # noqa: BLE001
+        pass
+
+    empty_walls = {"near": [], "mid": [], "far": [], "bid_total": 0.0,
+                   "ask_total": 0.0, "span_pct": 0.0, "tiers": {}}
+    return {
+        "symbol": sym,
+        "market": "us",
+        "price": _r(q.get("last")),
+        "change_pct": _r(q.get("change_pct")),
+        "high": _r(q.get("high")),
+        "low": _r(q.get("low")),
+        "mark": _r(q.get("last")),
+        "name": q.get("name"),
+        "oi": None, "oi_usd": None, "oi_change_pct": None,
+        "oi_change_1h_pct": None, "oi_change_usd": None, "oi_series": [],
+        "funding": None, "next_funding": 0,
+        "vol_usd": None, "vol_ratio": vol_ratio,
+        "spread_pct": None, "xex": None,
+        "imbalance": {"bid_usd": None, "ask_usd": None, "ratio": None, "band_pct": None},
+        "walls": empty_walls,
+        "orderflow": {},
+        "positioning": {},
+        "fear_greed": {},
+        "venues": [],
+        "volume_summary": {"bid": 0.0, "ask": 0.0, "total": 0.0, "venue_rows": []},
+        "ts": int(time.time() * 1000),
+    }
+
+
 # ---------------------------------------------------------------- 汇总
 def snapshot(symbol: str) -> dict:
+    if feed.market_of(symbol) == "us":
+        return _snapshot_us(feed.strip_us(symbol))
     base = feed.base_symbol(feed.norm_symbol(symbol))
     key = (base,)
     import time

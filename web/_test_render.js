@@ -106,7 +106,7 @@ const files = {
   "/api/symbols/all": "symbols_all", "/api/symbols": "symbols", "/api/mtf": "mtf",
   "/api/ticker": "symbols", "/api/scan": "symbols", "/api/chart": "chart",
   "/api/backtest": "backtest", "/api/snapshot": "snapshot", "/api/liqmap": "liqmap",
-  "/api/report": "report", "/api/ai/status": "ai_status",
+  "/api/report": "report", "/api/ai/status": "ai_status", "/api/news": "news",
 };
 const sandbox = {
   document,
@@ -130,7 +130,9 @@ const code = fs.readFileSync(path.join(__dirname, "app.js"), "utf8") +
   "\n;globalThis.__state = state; globalThis.__renderToolbar = renderToolbar;" +
   "\n;globalThis.__filterSymbols = filterSymbols; globalThis.__allSymbols = () => allSymbols;" +
   "\n;globalThis.__loadAllSymbols = loadAllSymbols; globalThis.__loadAiStatus = loadAiStatus;" +
-  "\n;globalThis.__handleAiEvent = handleAiEvent; globalThis.__askAI = askAI;";
+  "\n;globalThis.__handleAiEvent = handleAiEvent; globalThis.__askAI = askAI;" +
+  "\n;globalThis.__regressionChannel = regressionChannel; globalThis.__findDivergences = findDivergences;" +
+  "\n;globalThis.__findTwoB = findTwoB; globalThis.__renderChartTools = renderChartTools;";
 vm.runInContext(code, ctx, { filename: "app.js" });
 
 const S = ctx.__state;
@@ -174,6 +176,32 @@ const text = id => document.getElementById(id).textContent;
     if (process.env.VERBOSE) console.log(e.stack);
   }
 
+  run("图表工具栏状态渲染", () => {
+    ctx.__renderChartTools();
+    const h = html("chartTools");
+    for (const label of ["挂单墙", "回归50", "回归100", "回归200", "背离", "2B"]) {
+      if (!h.includes(label)) throw new Error("工具栏缺少 " + label);
+    }
+    if (h.includes('data-chart-tool="walls" title="历史')) throw new Error("挂单墙仍标记为未实现");
+    return "功能按钮齐全";
+  });
+
+  run("回归通道计算", () => {
+    const r = ctx.__regressionChannel([1, 2, 3, 4, 5], 5);
+    if (Math.abs(r.mid[4] - 5) > 1e-9 || Math.abs(r.upper[4] - r.mid[4]) > 1e-9 || Math.abs(r.lower[4] - r.mid[4]) > 1e-9) throw new Error("无噪声线性样本的回归值错误");
+    const noisy = ctx.__regressionChannel([1, 2, 3, 4, 6], 5);
+    if (!(noisy.upper[4] > noisy.mid[4]) || !(noisy.lower[4] < noisy.mid[4])) throw new Error("标准差边界错误");
+    return "线性中线与残差边界有效";
+  });
+
+  run("2B假突破识别", () => {
+    const b = { high: Array(25).fill(100), low: Array(25).fill(90), close: Array(25).fill(95) };
+    b.high[24] = 101; b.close[24] = 99;
+    const found = ctx.__findTwoB(b);
+    if (!found.some(x => x.i === 24 && x.dir === -1)) throw new Error("未检测到上破后收回");
+    return "识别上破回落";
+  });
+
   run("行情条", () => {
     const h = html("quoteBar");
     if (!h || h.length < 100) throw new Error("quoteBar 为空");
@@ -201,6 +229,24 @@ const text = id => document.getElementById(id).textContent;
     const n = (tb.match(/<tr>/g) || []).length;
     if (n < 3) throw new Error("行数过少: " + n);
     return n + " 行";
+  });
+
+  run("右栏资金费率与大单", () => {
+    const funding = html("fundingPanel");
+    const large = html("largeOrders");
+    if (!funding.includes("年") && !funding.includes("%")) throw new Error("资金费率未渲染");
+    if (!large.includes("金额") || !large.includes("买") && !large.includes("卖")) throw new Error("大单盘口未渲染");
+    return "资金费率榜与盘口大单已渲染";
+  });
+
+  run("现货筛选明确缺少数据源", () => {
+    S.venueFilter = "spot";
+    ctx.renderVenues(load("snapshot"));
+    const tb = document.getElementById("venueTable").querySelector("tbody").innerHTML;
+    if (!tb.includes("暂无现货数据源")) throw new Error("现货源缺失状态未说明");
+    S.venueFilter = "all";
+    ctx.renderVenues(load("snapshot"));
+    return "未将合约行情伪装为现货";
   });
 
   run("挂单墙表", () => {
@@ -338,6 +384,10 @@ const text = id => document.getElementById(id).textContent;
 
   run("研判报告渲染", () => {
     const d = load("report");
+    d.coverage = {
+      instrument: "USDT 永续合约", venue_count: 2, venues: ["Binance", "Bybit"],
+      liquidations: "模型估算", note: "未接入跨交易所实时爆仓事件。",
+    };
     ctx.renderReport(d);
     const h = html("rpBody");
     if (!h || h.length < 2000) throw new Error("正文过短: " + (h || "").length);
@@ -347,6 +397,7 @@ const text = id => document.getElementById(id).textContent;
     if (cards < 4) throw new Error("卡片数过少: " + cards);
     const findings = (h.match(/rp-finding/g) || []).length;
     if (findings < 3) throw new Error("矛盾点过少: " + findings);
+    if (!h.includes("成交额 2 所") || !h.includes("模型估算")) throw new Error("数据覆盖说明缺失");
     if (!text("rpMeta")) throw new Error("标题栏为空");
     return `${sections} 章节 / ${cards} 卡片 / ${findings} 条辨析 / ${h.length} 字符`;
   });
@@ -391,6 +442,71 @@ const text = id => document.getElementById(id).textContent;
     ctx.__handleAiEvent({ type: "error", message: "未配置 API Key" });
     if (out.innerHTML.indexOf("rp-ai-err") < 0) throw new Error("未渲染错误");
     return "ok";
+  });
+
+  run("实时快讯渲染", () => {
+    ctx.renderNews(load("news"));
+    const n = (html("newsBody").match(/nd-item/g) || []).length;
+    if (n < 10) throw new Error("条目过少: " + n);
+    if (!text("newsMeta")) throw new Error("统计行为空");
+    return `${n} 条 · ${text("newsMeta")}`;
+  });
+
+  run("快讯分类标签齐备", () => {
+    const h = html("newsBody");
+    for (const t of ["tag-crypto", "tag-stock", "tag-macro"]) {
+      if (h.indexOf(t) < 0) throw new Error("缺少标签 " + t);
+    }
+    return "加密/美股/宏观";
+  });
+
+  run("美股空数据降级", () => {
+    S.market = "us";
+    ctx.renderVenues({ venues: [] });
+    const tb = document.getElementById("venueTable").querySelector("tbody").innerHTML;
+    if (tb.indexOf("美股") < 0) throw new Error("量能面板未提示美股: " + tb);
+    ctx.renderLiqmap({ ok: false });
+    const lt = document.getElementById("liqTable").querySelector("tbody").innerHTML;
+    if (lt.indexOf("美股") < 0) throw new Error("多空损面板未提示美股: " + lt);
+    S.market = "crypto";
+    return "已降级";
+  });
+
+  run("美股 K 线渲染", () => {
+    const d = load("chart_us");
+    S.market = "us";
+    S.chartData = d;
+    ctx.renderChart();
+    const n = (S.candleSeries._data || []).length;
+    if (n < 100) throw new Error("K 线数据量异常: " + n);
+    if (!S.candleSeries._data[0].open) throw new Error("首根无开盘价");
+    S.market = "crypto";
+    return n + " 根，末价 " + S.candleSeries._data[n - 1].close;
+  });
+
+  run("切标的后旧清算线不污染价格轴", () => {
+    // 复现真实 bug：美股图上残留加密的清算价位（~7万），会把价格轴撑爆
+    S.market = "us";
+    S.chartData = load("chart_us");     // 价格 ~355
+    S.liq = load("liqmap");             // 清算价位 ~7 万
+    ctx.renderChart();
+    const n = (S.priceLines || []).length;
+    if (n !== 0) throw new Error("仍画出了 " + n + " 条超范围价格线，价格轴会被撑开");
+    S.liq = null;
+    S.market = "crypto";
+    return "已拦截";
+  });
+
+  run("美股研判渲染", () => {
+    S.market = "us";
+    ctx.renderMTF(load("mtf_us"));
+    ctx.renderSnapshot(load("snapshot_us"));
+    const n = (html("trendStrip").match(/trend-card/g) || []).length;
+    if (n !== 6) throw new Error("周期卡片数 " + n);
+    const q = html("quoteBar");
+    if (q.indexOf("q-price") < 0) throw new Error("行情条为空");
+    S.market = "crypto";
+    return `${n} 张卡片，行情条 ${q.length} 字符`;
   });
 
   console.log("=".repeat(72));

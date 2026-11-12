@@ -85,6 +85,17 @@ def opener():
     return _route()["opener"]
 
 
+_direct_opener = None
+
+
+def direct_opener():
+    """不走代理的 opener。国内站点（金十、新浪）走直连更快更稳。"""
+    global _direct_opener
+    if _direct_opener is None:
+        _direct_opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    return _direct_opener
+
+
 def transport_name() -> str:
     return (_route() or {}).get("name", "未探测")
 
@@ -106,7 +117,34 @@ def get_json(url: str, retries: int = 2, timeout: float | None = None):
 
 
 # ---------------------------------------------------------------- 符号
+_US_SET = {s.upper() for s in C.US_SYMBOLS}
+
+
+def market_of(symbol: str) -> str:
+    """判断标的属于哪个市场：'us' 或 'crypto'。
+
+    带 US: 前缀强制按美股；否则命中美股列表/指数符号的按美股。
+    """
+    s = (symbol or "").strip().upper()
+    if s.startswith(C.US_PREFIX):
+        return "us"
+    if s.startswith("^"):
+        return "us"
+    if s in _US_SET:
+        return "us"
+    return "crypto"
+
+
+def strip_us(symbol: str) -> str:
+    s = (symbol or "").strip().upper()
+    if s.startswith(C.US_PREFIX):
+        s = s[len(C.US_PREFIX):]
+    return s
+
+
 def norm_symbol(sym: str) -> str:
+    if market_of(sym) == "us":
+        return strip_us(sym)
     s = (sym or "").strip().upper()
     if not s:
         raise ValueError("symbol 为空")
@@ -118,6 +156,8 @@ def norm_symbol(sym: str) -> str:
 
 
 def base_symbol(pair: str) -> str:
+    if market_of(pair) == "us":
+        return strip_us(pair)
     return pair[:-len(C.QUOTE)] if pair.endswith(C.QUOTE) else pair
 
 
@@ -229,6 +269,9 @@ def klines(symbol: str, tf: str, force: bool = False, want: int | None = None) -
     """
     if tf not in C.TIMEFRAMES:
         raise ValueError(f"不支持的周期: {tf}")
+    if market_of(symbol) == "us":
+        from . import usstock
+        return usstock.klines(strip_us(symbol), tf, force=force, want=want)
     pair = norm_symbol(symbol)
     key = (pair, tf)
     need = min(int(want or C.BARS), PAGE_CAP)
@@ -268,6 +311,9 @@ def klines(symbol: str, tf: str, force: bool = False, want: int | None = None) -
 # ---------------------------------------------------------------- 快照信息
 def ticker(symbol: str, light: bool = False) -> dict:
     """24h 行情。light=True 时只拉 ticker/24hr（列表页用，省 2/3 请求）。"""
+    if market_of(symbol) == "us":
+        from . import usstock
+        return usstock.ticker(strip_us(symbol), light=light)
     pair = norm_symbol(symbol)
     key = ("ticker_light" if light else "ticker", pair)
     now = time.time()

@@ -7,16 +7,17 @@ const C = { up: "#00b956", down: "#ff4976", accent: "#4da6ff", dim: "#8b949e",
 const TF_ORDER = ["15m", "30m", "1h", "4h", "1d", "1w"];
 
 const state = {
-  symbol: "BTC", tf: "1h", sub: "macd", wallTier: "near",
+  symbol: "BTC", tf: "1h", sub: "macd", wallTier: "near", venueFilter: "all", market: "crypto", newsTag: "all",
   overlays: {
     ma: true, ema: false, boll: false, st: false, vwap: false, markers: true,
     ichimoku: false, psar: false, keltner: false, donchian: false,
     hma: false, vwma: false, chandelier: false, pivot: false,
   },
-  snap: null, mtf: null, chartData: null, liq: null, priceLines: [],
+  snap: null, mtf: null, chartData: null, liq: null, priceLines: [], wallLines: [],
   mainChart: null, subChart: null, candleSeries: null, volSeries: null,
   overlaySeries: [], subSeries: [], syncing: false, loading: 0,
-  nextFunding: 0, timers: [],
+  nextFunding: 0, timers: [], gaugesHidden: false, chartMaximized: false, chartLiq: true,
+  chartTools: { walls: true, reg50: false, reg100: false, reg200: false, divergence: false, twoB: false },
 };
 
 /* ---------------------------------------------------------------- 工具 */
@@ -58,6 +59,11 @@ async function api(path) {
   const j = await r.json();
   if (!r.ok || j.error) throw new Error(j.error || ("HTTP " + r.status));
   return j;
+}
+
+/* 美股标的一律加 US: 前缀发给后端，避免与同名加密标的混淆 */
+function apiSym() {
+  return state.market === "us" ? "US:" + state.symbol : state.symbol;
 }
 
 /* ---------------------------------------------------------------- 图表 */
@@ -159,6 +165,13 @@ function renderChart() {
     });
   }
   if (ov.ema) Object.keys(d.ema).forEach((p, i) => addOverlay(EMA_COLORS[i % EMA_COLORS.length], d.ema[p]));
+  for (const [key, period, color] of [["reg50", 50, "#f0b90b"], ["reg100", 100, C.accent], ["reg200", 200, C.purple]]) {
+    if (!state.chartTools[key]) continue;
+    const band = regressionChannel(d.bars.close, period);
+    addOverlay(color, band.mid, { lineWidth: 1.5 });
+    addOverlay(color + "77", band.upper, { lineWidth: 1 });
+    addOverlay(color + "77", band.lower, { lineWidth: 1 });
+  }
   if (ov.boll) {
     addOverlay("#4da6ff", d.boll.mid, { lineStyle: 2 });
     addOverlay("#4da6ff66", d.boll.upper);
@@ -220,6 +233,8 @@ function renderChart() {
       });
     }
   }
+  if (state.chartTools.divergence) markers.push(...findDivergences(d).map(x => ({ time: t[x.i], position: x.dir > 0 ? "belowBar" : "aboveBar", color: x.dir > 0 ? C.up : C.down, shape: x.dir > 0 ? "arrowUp" : "arrowDown", text: `RSI背离 ${x.dir > 0 ? "底" : "顶"}` })));
+  if (state.chartTools.twoB) markers.push(...findTwoB(d.bars).map(x => ({ time: t[x.i], position: x.dir > 0 ? "belowBar" : "aboveBar", color: x.dir > 0 ? C.up : C.down, shape: x.dir > 0 ? "arrowUp" : "arrowDown", text: `2B${x.dir > 0 ? "多" : "空"}` })));
   markers.sort((a, b) => a.time - b.time);
   state.candleSeries.setMarkers(markers);
 
@@ -242,7 +257,82 @@ function renderChart() {
   state.mainChart.timeScale().fitContent();
   renderSR();
   setPriceLines(state.liq);
+  setWallLines(state.snap);
   applyPivots();
+}
+
+const CHART_TOOLS = [
+  ["liq", "清算", "估算清算价位", true], ["walls", "挂单墙", "当前订单簿挂单墙快照（非历史轨迹）", true],
+  ["estimated", "预估清算", "预估清算价位", true], ["reg50", "回归50", "50根K线线性回归 ±1标准差", true],
+  ["reg100", "回归100", "100根K线线性回归 ±1标准差", true], ["reg200", "回归200", "200根K线线性回归 ±1标准差", true],
+  ["ema", "EMA带", "切换 EMA 均线", true], ["kc", "双KC", "切换肯特纳通道", true],
+  ["div", "背离", "RSI 与价格的局部高低点背离", true], ["patterns", "形态", "切换K线形态标记", true],
+  ["twoB", "2B", "20根区间假突破并在3根内收回", true],
+];
+
+function renderChartTools() {
+  $("chartTools").innerHTML = CHART_TOOLS.map(([key, label, tip, enabled]) => {
+    const active = key === "liq" || key === "estimated" ? state.chartLiq
+      : key === "walls" ? state.chartTools.walls
+      : key === "ema" ? state.overlays.ema : key === "kc" ? state.overlays.keltner
+        : key === "patterns" ? state.overlays.markers
+          : key === "div" ? state.chartTools.divergence : state.chartTools[key] || false;
+    return `<button class="chart-tool ${active ? "active" : ""}" data-chart-tool="${key}" title="${tip}" ${enabled ? "" : "disabled"}>${label}</button>`;
+  }).join("");
+}
+
+function regressionChannel(values, period) {
+  const n = values.length, start = Math.max(0, n - period), len = n - start;
+  const mid = Array(n).fill(null), upper = Array(n).fill(null), lower = Array(n).fill(null);
+  if (len < 3) return { mid, upper, lower };
+  let sx = 0, sy = 0, sxx = 0, sxy = 0;
+  for (let j = 0; j < len; j++) { const y = num(values[start + j]); sx += j; sy += y; sxx += j * j; sxy += j * y; }
+  const slope = (len * sxy - sx * sy) / (len * sxx - sx * sx), intercept = (sy - slope * sx) / len;
+  const residuals = [];
+  for (let j = 0; j < len; j++) residuals.push(num(values[start + j]) - (intercept + slope * j));
+  const sd = Math.sqrt(residuals.reduce((sum, x) => sum + x * x, 0) / len);
+  for (let j = 0; j < len; j++) { const i = start + j, v = intercept + slope * j; mid[i] = v; upper[i] = v + sd; lower[i] = v - sd; }
+  return { mid, upper, lower };
+}
+
+function swingPoints(values, high = true, radius = 3) {
+  const out = [];
+  for (let i = radius; i < values.length - radius; i++) {
+    const v = num(values[i]); if (v === null) continue;
+    let extreme = true;
+    for (let j = i - radius; j <= i + radius; j++) if (j !== i && (high ? num(values[j]) >= v : num(values[j]) <= v)) { extreme = false; break; }
+    if (extreme) out.push({ i, v });
+  }
+  return out;
+}
+
+function findDivergences(d) {
+  const lows = swingPoints(d.bars.low, false).filter(x => num(d.rsi[x.i]) !== null);
+  const highs = swingPoints(d.bars.high, true).filter(x => num(d.rsi[x.i]) !== null);
+  const found = [];
+  for (const [points, dir] of [[lows, 1], [highs, -1]]) {
+    const a = points.at(-2), b = points.at(-1); if (!a || !b) continue;
+    const rsiA = num(d.rsi[a.i]), rsiB = num(d.rsi[b.i]);
+    if ((dir > 0 && b.v < a.v && rsiB > rsiA) || (dir < 0 && b.v > a.v && rsiB < rsiA)) found.push({ i: b.i, dir });
+  }
+  return found;
+}
+
+function findTwoB(bars) {
+  const found = [], n = bars.close.length, lookback = 20, maxReturnBars = 3;
+  for (let i = lookback; i < n; i++) {
+    const top = Math.max(...bars.high.slice(i - lookback, i)), bottom = Math.min(...bars.low.slice(i - lookback, i));
+    if (bars.high[i] > top && bars.close[i] < top) found.push({ i, dir: -1 });
+    else if (bars.low[i] < bottom && bars.close[i] > bottom) found.push({ i, dir: 1 });
+    else if (i >= maxReturnBars) {
+      for (let k = 1; k < maxReturnBars; k++) {
+        const j = i - k, prevTop = Math.max(...bars.high.slice(j - lookback, j)), prevBottom = Math.min(...bars.low.slice(j - lookback, j));
+        if (bars.high[j] > prevTop && bars.close[i] < prevTop) { found.push({ i, dir: -1 }); break; }
+        if (bars.low[j] < prevBottom && bars.close[i] > prevBottom) { found.push({ i, dir: 1 }); break; }
+      }
+    }
+  }
+  return found;
 }
 
 function applyPivots() {
@@ -466,7 +556,98 @@ function renderSnapshot(s) {
   renderWalls(s);
   renderFlow(s);
   renderPositions(s);
+  renderDerivStrip(s);
 }
+
+function drawSpark(canvas, points, color) {
+  const ctx = canvas && canvas.getContext && canvas.getContext("2d");
+  if (!ctx) return;
+  const w = canvas.clientWidth || 120, h = canvas.clientHeight || 28;
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = Math.round(w * dpr); canvas.height = Math.round(h * dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, w, h);
+  const values = (points || []).map(x => num(Array.isArray(x) ? x[1] : x)).filter(x => x !== null);
+  if (values.length < 2) return;
+  const lo = Math.min(...values), hi = Math.max(...values), span = hi - lo || 1;
+  ctx.strokeStyle = color; ctx.lineWidth = 1.5; ctx.beginPath();
+  values.forEach((v, i) => {
+    const x = 2 + (w - 4) * i / (values.length - 1);
+    const y = h - 2 - (h - 4) * (v - lo) / span;
+    if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y);
+  });
+  ctx.stroke();
+}
+
+function renderDerivStrip(s) {
+  const p = s.positioning || {}, flow = s.orderflow || {};
+  const oi = s.oi_series || [];
+  const ratioParts = [
+    ["大户持仓", p.top_position_ratio], ["大户账户", p.top_account_ratio], ["全网多空", p.global_ratio],
+  ].filter(x => num(x[1]) !== null);
+  const ratioText = ratioParts.length
+    ? ratioParts.map(([k, v]) => `${k} ${fx(v, 2)}`).join(" · ")
+    : "暂无多空比数据";
+  $("derivStrip").innerHTML = `
+    <div class="deriv-card"><div><span>OI 持仓量 · 24h</span><b class="${cls(s.oi_change_pct)}">${usd(s.oi_usd)} · ${pct(s.oi_change_pct)}</b></div><canvas id="oiSpark" aria-label="OI 24小时走势"></canvas><small>来源：Binance U 本位永续 · ${oi.length} 点</small></div>
+    <div class="deriv-card"><div><span>主动买卖 CVD</span><b class="${cls(flow.cvd)}">${usd(flow.cvd)}</b></div><canvas id="cvdSpark" aria-label="CVD 历史走势"></canvas><small>近 ${flow.series && flow.series.length || 0} 根 1h K 线估算</small></div>
+    <div class="deriv-card deriv-ratios"><div><span>多空比快照</span><b>${ratioParts.length ? "当前值" : "--"}</b></div><p>${ratioText}</p><small>公开账户比例，不代表全市场真实持仓</small></div>`;
+  drawSpark($("oiSpark"), oi, C.accent);
+  drawSpark($("cvdSpark"), flow.series, num(flow.cvd) >= 0 ? C.up : C.down);
+}
+
+function openTool(title, html) {
+  $("toolTitle").textContent = title;
+  $("toolBody").innerHTML = html;
+  $("toolModal").hidden = false;
+}
+
+function openWhatIf() {
+  if (state.market !== "crypto") {
+    openTool("目标价推演", '<div class="empty">美股没有永续合约持仓量，无法估算清算风险。</div>'); return;
+  }
+  const price = num(state.snap && state.snap.price);
+  const levels = state.liq && state.liq.ok ? state.liq.levels || [] : [];
+  if (!price || !levels.length) {
+    openTool("目标价推演", '<div class="empty">清算分布尚不可用，暂时无法进行情景估算。</div>'); return;
+  }
+  const lo = price * 0.88, hi = price * 1.12, target = price;
+  openTool(`目标价推演 · ${escapeHtml(state.symbol)}`, `<div class="tool-intro">按当前 ${escapeHtml(state.liq.model || "模型")} 估算分布，计算目标价路径上可能触发的清算名义金额。不是交易所实时强平订单。</div>
+    <div class="tool-input-row"><input id="wiSlider" type="range" min="${lo}" max="${hi}" step="${Math.max(price * 0.0001, 0.00000001)}" value="${target}"><input id="wiPrice" type="number" min="${lo}" max="${hi}" step="any" value="${target}"></div>
+    <div id="wiResult" class="tool-result"></div>`);
+  const calc = () => {
+    const t = num($("wiPrice").value), out = $("wiResult");
+    if (!t || t <= 0) { out.textContent = "请输入有效目标价。"; return; }
+    $("wiSlider").value = Math.max(lo, Math.min(hi, t));
+    const falling = t < price;
+    const hit = levels.filter(z => falling ? z.price < price && z.price >= t : z.price > price && z.price <= t);
+    const amount = hit.reduce((sum, z) => sum + (num(falling ? z.long_usd : z.short_usd) || 0), 0);
+    const oi = num(state.snap.oi_usd);
+    out.innerHTML = `<b>${falling ? "下跌触发多头" : t > price ? "上涨触发空头" : "目标价等于现价"} · ${usd(amount)}</b><span>目标价 ${fmt(t)} · 距现价 ${spct((t / price - 1) * 100, 2)} · 覆盖 ${hit.length} 个估算价位${oi ? ` · 约占 OI ${(amount / oi * 100).toFixed(2)}%` : ""}</span><small>模型估算会受杠杆分布和维持保证金假设影响；未覆盖区间及真实账户风险可能不同。</small>`;
+  };
+  $("wiSlider").addEventListener("input", () => { $("wiPrice").value = $("wiSlider").value; calc(); });
+  $("wiPrice").addEventListener("input", calc); calc();
+}
+
+function openLiqCalc() {
+  const price = num(state.snap && state.snap.price);
+  if (state.market !== "crypto") {
+    openTool("爆仓价计算", '<div class="empty">爆仓价仅适用于杠杆衍生品，美股现货不适用。</div>'); return;
+  }
+  openTool(`爆仓价计算 · ${escapeHtml(state.symbol)}`, `<div class="tool-intro">简化估算公式：多头 = 开仓价 × (1 - 1/杠杆 + 维持保证金率)，空头 = 开仓价 × (1 + 1/杠杆 - 维持保证金率)。未计手续费、逐仓/全仓差异和交易所分档规则。</div>
+    <div class="calc-grid"><label>方向<select id="calcSide" class="model-select"><option value="long">做多</option><option value="short">做空</option></select></label><label>杠杆<input id="calcLev" type="number" min="1" max="125" step="1" value="10"></label><label>开仓价<input id="calcEntry" type="number" min="0" step="any" value="${price || ""}"></label><label>维持保证金率 (%)<input id="calcMmr" type="number" min="0" max="50" step="0.1" value="0.4"></label></div><div id="calcResult" class="tool-result"></div>`);
+  const calc = () => {
+    const side = $("calcSide").value, lev = num($("calcLev").value), entry = num($("calcEntry").value), mmr = num($("calcMmr").value);
+    const out = $("calcResult");
+    if (!entry || entry <= 0 || !lev || lev < 1 || mmr === null || mmr < 0 || mmr >= 100) { out.textContent = "请填写有效开仓价、杠杆和保证金率。"; return; }
+    const rate = mmr / 100;
+    const liq = entry * (side === "long" ? 1 - 1 / lev + rate : 1 + 1 / lev - rate);
+    const distance = price ? (liq / price - 1) * 100 : null;
+    out.innerHTML = `<b>${side === "long" ? "多头" : "空头"}估算清算价 · ${fmt(liq)}</b><span>相对现价 ${distance === null ? "--" : spct(distance, 2)} · ${lev}x · 维持保证金 ${mmr}%</span><small>这是简化数学估算，不是交易所强平价；请以交易所仓位页面为准。</small>`;
+  };
+  ["calcSide", "calcLev", "calcEntry", "calcMmr"].forEach(id => $(id).addEventListener("input", calc)); calc();
+}
+
+function closeTool() { $("toolModal").hidden = true; }
 
 function renderQuote(s) {
   const chg = num(s.change_pct);
@@ -499,19 +680,33 @@ function tickCountdown() {
 }
 
 function renderVenues(s) {
-  const vs = s.venues || [];
-  const totalVol = vs.reduce((a, v) => a + (v.vol_usd || 0), 0);
-  $("volLegend").textContent = `${vs.length} 所 · 合计 ${usd(totalVol)}`;
-
+  const all = s.venues || [];
+  const vs = state.venueFilter === "spot" ? [] : all;
   const tbody = $("venueTable").querySelector("tbody");
+  const fundingRows = all.filter(v => num(v.funding) !== null)
+    .map(v => ({ ...v, annual: Number(v.funding) * 3 * 365 * 100 }))
+    .sort((a, b) => b.annual - a.annual);
+  $("fundingPanel").innerHTML = fundingRows.length
+    ? `<table class="tbl funding-table"><thead><tr><th>交易所</th><th>费率/期</th><th>年化估算</th></tr></thead><tbody>${fundingRows.map(v => `<tr><td>${v.name}</td><td class="${cls(v.funding)}">${(v.funding * 100).toFixed(4)}%</td><td class="${cls(v.annual)}">${v.annual > 0 ? "+" : ""}${v.annual.toFixed(1)}%</td></tr>`).join("")}</tbody></table>`
+    : `<div class="empty compact">${state.market === "us" ? "美股无永续资金费率" : "暂无资金费率数据"}</div>`;
+  if (!vs.length) {
+    $("volLegend").textContent = state.market === "us" ? "美股无多所聚合" : state.venueFilter === "spot" ? "现货源未接入" : "无数据";
+    $("volSummary").innerHTML = state.market === "us" ? "" : `<div class="empty compact">现货行情源未接入，当前量能仅统计合约</div>`;
+    tbody.innerHTML = `<tr><td colspan="7" class="muted">${state.market === "us" ? "美股不做多交易所量能聚合" : state.venueFilter === "spot" ? "暂无现货数据源" : "无数据"}</td></tr>`;
+    return;
+  }
+  const totalVol = vs.reduce((a, v) => a + (v.vol_usd || 0), 0);
+  $("volLegend").textContent = `${vs.length} 所合约 · ${usd(totalVol)}`;
+
   tbody.innerHTML = vs.map(v => `<tr>
     <td>${v.name}</td>
+    <td>合约</td>
     <td>${fmt(v.last)}</td>
     <td class="${cls(v.change)}">${pct(v.change)}</td>
     <td>${usd(v.vol_usd)}</td>
-    <td>${v.oi_usd ? usd(v.oi_usd) : "--"}</td>
-    <td class="${v.funding > 0 ? "up" : v.funding < 0 ? "down" : ""}">${v.funding ? (v.funding * 100).toFixed(4) + "%" : "--"}</td>
-  </tr>`).join("") || '<tr><td colspan="6" class="muted">无数据</td></tr>';
+    <td>${num(v.oi_usd) !== null ? usd(v.oi_usd) : "--"}</td>
+    <td class="${cls(v.funding)}">${num(v.funding) !== null ? (v.funding * 100).toFixed(4) + "%" : "--"}</td>
+  </tr>`).join("") || '<tr><td colspan="7" class="muted">无数据</td></tr>';
 
   // 量能条：按交易所成交量占比
   const top = vs.slice(0, 4);
@@ -542,6 +737,15 @@ function renderWalls(s) {
     <td class="${cls(w.dist_pct)}">${spct(w.dist_pct, 3)}</td>
     <td class="${w.side === "bid" ? "up" : "down"}">${w.side === "bid" ? "买墙" : "卖墙"}</td>
   </tr>`).join("") || '<tr><td colspan="4" class="muted">无数据</td></tr>';
+
+  const large = ["near", "mid", "far"].flatMap(key => (w[key] || []).map(row => ({ ...row, tier: labels[key] })))
+    .filter(row => num(row.total) !== null && Number(row.total) >= 50000)
+    .sort((a, b) => b.total - a.total)
+    .filter((row, i, list) => list.findIndex(x => x.price === row.price && x.side === row.side) === i)
+    .slice(0, 10);
+  $("largeOrders").innerHTML = large.length
+    ? `<table class="tbl large-order-table"><thead><tr><th>价格</th><th>金额</th><th>距离</th><th>档位</th><th>方向</th></tr></thead><tbody>${large.map(row => `<tr><td>${fmt(row.price)}</td><td>${usd(row.total)}</td><td>${spct(row.dist_pct, 3)}</td><td>${row.tier}</td><td class="${row.side === "bid" ? "up" : "down"}">${row.side === "bid" ? "买" : "卖"}</td></tr>`).join("")}</tbody></table>`
+    : `<div class="empty compact">当前盘口没有 ≥$50K 的分层挂单</div>`;
 }
 
 function renderFlow(s) {
@@ -702,7 +906,7 @@ function renderPatterns() {
 /* ---------------------------------------------------------------- 数据加载 */
 async function loadSnapshot() {
   try {
-    const s = await api(`/api/snapshot?symbol=${state.symbol}`);
+    const s = await api(`/api/snapshot?symbol=${apiSym()}`);
     renderSnapshot(s);
   } catch (e) {
     console.error(e);
@@ -712,7 +916,7 @@ async function loadSnapshot() {
 
 async function loadMTF() {
   try {
-    const m = await api(`/api/mtf?symbol=${state.symbol}`);
+    const m = await api(`/api/mtf?symbol=${apiSym()}`);
     renderMTF(m);
   } catch (e) {
     console.error(e);
@@ -725,7 +929,7 @@ async function loadChart(keepView) {
   $("chartLoading").hidden = false;
   try {
     const range = keepView && state.mainChart ? state.mainChart.timeScale().getVisibleLogicalRange() : null;
-    const d = await api(`/api/chart?symbol=${state.symbol}&tf=${state.tf}&limit=320`);
+    const d = await api(`/api/chart?symbol=${apiSym()}&tf=${state.tf}&limit=320`);
     state.chartData = d;
     renderChart();
     if (range) { try { state.mainChart.timeScale().setVisibleLogicalRange(range); } catch (e) { /* ignore */ } }
@@ -750,7 +954,7 @@ async function loadHealth() {
 /* ---------------------------------------------------------------- 多空损 */
 async function loadLiqmap() {
   try {
-    const d = await api(`/api/liqmap?symbol=${state.symbol}&range=12`);
+    const d = await api(`/api/liqmap?symbol=${apiSym()}&range=12`);
     state.liq = d;
     renderLiqmap(d);
     setPriceLines(d);
@@ -765,7 +969,10 @@ function renderLiqmap(d) {
   if (!d || !d.ok) {
     $("liqLegend").textContent = "无数据";
     $("liqStats").innerHTML = "";
-    tb.innerHTML = '<tr><td colspan="4" class="muted">该标的持仓量不足，无法估算</td></tr>';
+    const msg = state.market === "us"
+      ? "美股没有持仓量/杠杆数据，多空损仅适用于加密永续"
+      : "该标的持仓量不足，无法估算";
+    tb.innerHTML = `<tr><td colspan="4" class="muted">${msg}</td></tr>`;
     return;
   }
   $("liqLegend").textContent = `${d.model} · ±${d.range_pct}%`;
@@ -796,16 +1003,53 @@ function setPriceLines(d) {
     try { state.candleSeries.removePriceLine(pl); } catch (e) { /* ignore */ }
   }
   state.priceLines = [];
-  if (!d || !d.ok) return;
+  if (!state.chartLiq || !d || !d.ok) return;
+
+  // 关键：价格线必须落在当前 K 线的范围内，否则会把价格轴撑开，
+  // 导致蜡烛被压成一条线（切标的时旧的清算线残留就会这样）。
+  const bars = state.chartData && state.chartData.bars;
+  let lo = -Infinity, hi = Infinity;
+  if (bars && bars.low && bars.high) {
+    const lows = bars.low.filter(x => x !== null && x !== undefined);
+    const highs = bars.high.filter(x => x !== null && x !== undefined);
+    if (lows.length && highs.length) {
+      lo = Math.min(...lows);
+      hi = Math.max(...highs);
+      const pad = (hi - lo) * 0.5 || hi * 0.1;
+      lo -= pad;
+      hi += pad;
+    }
+  }
+
   const add = (z, color, title) => {
     if (!z) return;
+    const p = num(z.price);
+    if (p === null || p <= 0 || p < lo || p > hi) return;   // 超出可视范围，跳过
     state.priceLines.push(state.candleSeries.createPriceLine({
-      price: z.price, color, lineWidth: 1, lineStyle: 2,
+      price: p, color, lineWidth: 1, lineStyle: 2,
       axisLabelVisible: true, title,
     }));
   };
   add(d.nearest_short, C.down, `空损 ${usd(d.nearest_short && d.nearest_short.short_usd)}`);
   add(d.nearest_long, C.up, `多损 ${usd(d.nearest_long && d.nearest_long.long_usd)}`);
+}
+
+function setWallLines(s) {
+  if (!state.candleSeries) return;
+  for (const line of state.wallLines) { try { state.candleSeries.removePriceLine(line); } catch (e) { /* ignore */ } }
+  state.wallLines = [];
+  if (!state.chartTools.walls || !s || !s.walls || state.market !== "crypto") return;
+  const bars = state.chartData && state.chartData.bars;
+  if (!bars) return;
+  const lows = bars.low.filter(Number.isFinite), highs = bars.high.filter(Number.isFinite);
+  if (!lows.length || !highs.length) return;
+  const lo = Math.min(...lows) * 0.95, hi = Math.max(...highs) * 1.05;
+  for (const wall of (s.walls.near || [])) {
+    const price = num(wall.price);
+    if (!price || price < lo || price > hi) continue;
+    const bid = wall.side === "bid";
+    state.wallLines.push(state.candleSeries.createPriceLine({ price, color: bid ? C.up : C.down, lineWidth: 1, lineStyle: 1, axisLabelVisible: true, title: `挂墙 ${usd(wall.total)}` }));
+  }
 }
 
 /* ---------------------------------------------------------------- 标的搜索 */
@@ -889,6 +1133,8 @@ function switchTF(tf) {
 
 function switchSymbol(sym) {
   state.symbol = sym;
+  state.liq = null;          // 换标的必须清掉旧的清算数据，否则价位会串到新图上
+  setPriceLines(null);
   $("symInput").value = sym;
   document.querySelectorAll("#symbolGroup .tb-btn").forEach(el => el.classList.toggle("active", el.dataset.sym === sym));
   loadSnapshot();
@@ -897,17 +1143,62 @@ function switchSymbol(sym) {
   loadLiqmap();
 }
 
+function switchMarket(mkt) {
+  if (mkt === state.market) return;
+  state.market = mkt;
+  document.querySelectorAll("#marketGroup .tb-btn").forEach(b => b.classList.toggle("active", b.dataset.mkt === mkt));
+  // 默认标的：加密 BTC / 美股 AAPL
+  state.symbol = mkt === "us" ? "AAPL" : "BTC";
+  state.tf = mkt === "us" ? "1d" : "1h";
+  state.liq = null;          // 切市场同样要清空，避免加密的清算价位画到美股图上
+  state.snap = null;
+  setPriceLines(null);
+  $("symInput").value = state.symbol;
+  loadSymbols();
+  loadSnapshot();
+  loadChart(false);
+  loadMTF();
+  loadLiqmap();
+}
+
 async function loadSymbols() {
   try {
-    const d = await api("/api/symbols");
-    $("symbolGroup").innerHTML = (d.symbols || []).map(s =>
-      `<button class="tb-btn ${s.symbol === state.symbol ? "active" : ""}" data-sym="${s.symbol}"
-        title="${s.last ? fmt(s.last) + "  " + pct(s.change_pct) : ""}">${s.symbol}</button>`).join("");
-    $("symbolGroup").querySelectorAll(".tb-btn").forEach(el => { el.onclick = () => switchSymbol(el.dataset.sym); });
+    const d = await api(`/api/symbols?market=${state.market}`);
+    const list = d.symbols || [];
+
+    // 加密市场显示 6 个常用；美股显示指数 + 热门股，超出滚动
+    const head = state.market === "us"
+      ? list.filter(s => s.index)
+      : list.slice(0, 6);
+    const body = state.market === "us"
+      ? list.filter(s => !s.index).slice(0, 22)
+      : [];
+    const shown = head.concat(body);
+    if (!shown.some(s => s.symbol === state.symbol) && list.length) {
+      state.symbol = list[0].symbol;
+    }
+
+    $("symbolGroup").innerHTML = shown.map(s => {
+      const title = s.last ? `${s.name || s.symbol} ${fmt(s.last)} ${pct(s.change_pct)}` : (s.name || s.symbol);
+      const name = s.index ? (s.name || s.symbol) : s.symbol;
+      return `<button class="tb-btn ${s.symbol === state.symbol ? "active" : ""}" data-sym="${s.symbol}"
+        title="${title}">${name}</button>`;
+    }).join("");
+    $("symbolGroup").querySelectorAll(".tb-btn").forEach(el => {
+      el.onclick = () => switchSymbol(el.dataset.sym);
+    });
 
     $("tfGroup").innerHTML = (d.timeframes || []).map(tf =>
       `<button class="tf-btn ${tf === state.tf ? "active" : ""}" data-tf="${tf}">${tf}</button>`).join("");
     $("tfGroup").querySelectorAll(".tf-btn").forEach(el => { el.onclick = () => switchTF(el.dataset.tf); });
+
+    // 美股搜索用股票列表；切回加密时恢复全量加密标的
+    if (state.market === "us") {
+      allSymbols = list.map(s => ({ symbol: s.symbol, pair: s.name || s.symbol }));
+    } else {
+      allSymbols = [];
+      loadAllSymbols();
+    }
   } catch (e) {
     $("symbolGroup").innerHTML = `<span class="pill">加载失败</span>`;
   }
@@ -954,6 +1245,64 @@ function renderToolbar() {
 }
 
 function bindUI() {
+  renderChartTools();
+  $("venueFilter").querySelectorAll("[data-market-filter]").forEach(btn => {
+    btn.onclick = () => {
+      state.venueFilter = btn.dataset.marketFilter;
+      $("venueFilter").querySelectorAll("[data-market-filter]").forEach(b => b.classList.toggle("active", b === btn));
+      if (state.snap) renderVenues(state.snap);
+    };
+  });
+  document.querySelectorAll("[data-detail]").forEach(btn => {
+    btn.onclick = () => {
+      const snap = state.snap || {};
+      if (btn.dataset.detail === "volume") {
+        const rows = snap.venues || [];
+        openTool("全网量能详情", `<div class="bt-note">当前来源为各交易所 USDT 永续合约 24h 成交额；现货数据源未接入。成交额口径可能因交易所接口定义略有差异。</div><table class="tbl"><thead><tr><th>交易所</th><th>成交额</th><th>持仓</th><th>资金费率</th></tr></thead><tbody>${rows.map(v => `<tr><td>${escapeHtml(v.name)}</td><td>${usd(v.vol_usd)}</td><td>${usd(v.oi_usd)}</td><td>${num(v.funding) === null ? "--" : (v.funding * 100).toFixed(4) + "%"}</td></tr>`).join("")}</tbody></table>`);
+      } else {
+        const walls = snap.walls || {};
+        const rows = ["near", "mid", "far"].flatMap(key => (walls[key] || []).map(row => ({ ...row, tier: key })));
+        openTool("挂单墙详情", `<div class="bt-note">以下为最近一次盘口深度快照，不是逐笔成交或历史挂单。挂单可能随时撤销。</div><table class="tbl"><thead><tr><th>档位</th><th>价格</th><th>金额</th><th>距离</th><th>方向</th></tr></thead><tbody>${rows.map(row => `<tr><td>${row.tier}</td><td>${fmt(row.price)}</td><td>${usd(row.total)}</td><td>${spct(row.dist_pct, 3)}</td><td class="${row.side === "bid" ? "up" : "down"}">${row.side === "bid" ? "买" : "卖"}</td></tr>`).join("")}</tbody></table>`);
+      }
+    };
+  });
+  $("chartTools").onclick = e => {
+    const btn = e.target.closest("[data-chart-tool]");
+    if (!btn || btn.disabled) return;
+    const key = btn.dataset.chartTool;
+    if (key === "liq" || key === "estimated") {
+      state.chartLiq = !state.chartLiq;
+      setPriceLines(state.liq);
+    } else if (key === "walls") {
+      state.chartTools.walls = !state.chartTools.walls;
+      setWallLines(state.snap);
+    } else if (key === "ema") state.overlays.ema = !state.overlays.ema;
+    else if (key === "kc") state.overlays.keltner = !state.overlays.keltner;
+    else if (key === "patterns") state.overlays.markers = !state.overlays.markers;
+    else if (key === "div") state.chartTools.divergence = !state.chartTools.divergence;
+    else if (["reg50", "reg100", "reg200", "twoB"].includes(key)) state.chartTools[key] = !state.chartTools[key];
+    if (["ema", "kc", "patterns", "div", "reg50", "reg100", "reg200", "twoB"].includes(key) && state.chartData) renderChart();
+    renderChartTools();
+  };
+  $("btnWhatIf").onclick = openWhatIf;
+  $("btnLiqCalc").onclick = openLiqCalc;
+  $("toolClose").onclick = closeTool;
+  $("toolModal").onclick = e => { if (e.target.id === "toolModal") closeTool(); };
+  $("btnToggleGauge").onclick = () => {
+    state.gaugesHidden = !state.gaugesHidden;
+    $("gaugeRow").hidden = state.gaugesHidden;
+    $("btnToggleGauge").textContent = state.gaugesHidden ? "展开仪表" : "收起仪表";
+  };
+  $("btnResetChart").onclick = () => {
+    if (state.mainChart) state.mainChart.timeScale().fitContent();
+    if (state.subChart) state.subChart.timeScale().fitContent();
+  };
+  $("btnMaxChart").onclick = () => {
+    state.chartMaximized = !state.chartMaximized;
+    $("centerPane").classList.toggle("chart-maximized", state.chartMaximized);
+    $("btnMaxChart").textContent = state.chartMaximized ? "还原图表" : "最大化图表";
+    if (state.mainChart) setTimeout(() => state.mainChart.applyOptions({}), 0);
+  };
   $("btnRefresh").onclick = () => { loadSnapshot(); loadChart(false); loadMTF(); loadHealth(); };
   $("btnReport").onclick = openReport;
   $("rpClose").onclick = closeReport;
@@ -971,6 +1320,7 @@ function bindUI() {
   $("btModal").onclick = e => { if (e.target.id === "btModal") closeBacktest(); };
   document.addEventListener("keydown", e => {
     if (e.key !== "Escape") return;
+    if (!$("toolModal").hidden) closeTool();
     if (!$("rpModal").hidden) closeReport();
     if (!$("btModal").hidden) closeBacktest();
   });
@@ -981,6 +1331,23 @@ function bindUI() {
       if (state.snap) renderWalls(state.snap);
     };
   });
+
+  $("marketGroup").querySelectorAll(".tb-btn").forEach(b => {
+    b.onclick = () => switchMarket(b.dataset.mkt);
+  });
+
+  $("newsTabs").querySelectorAll(".nd-tab").forEach(b => {
+    b.onclick = () => {
+      state.newsTag = b.dataset.tag;
+      $("newsTabs").querySelectorAll(".nd-tab").forEach(x => x.classList.toggle("active", x === b));
+      loadNews();
+    };
+  });
+  $("newsToggle").onclick = () => {
+    const collapsed = $("newsDock").classList.toggle("collapsed");
+    $("newsToggle").textContent = collapsed ? "展开" : "收起";
+    if (state.mainChart) state.mainChart.applyOptions({});
+  };
 }
 
 /* ---------------------------------------------------------------- 回测 */
@@ -996,7 +1363,7 @@ async function runBacktest() {
   box.innerHTML = '<div class="empty">回测计算中，首次约 10~20 秒…</div>';
   try {
     const h = $("btHorizon").value;
-    const d = await api(`/api/backtest?symbol=${state.symbol}&tf=${state.tf}&horizon=${h}&bars=3000`);
+    const d = await api(`/api/backtest?symbol=${apiSym()}&tf=${state.tf}&horizon=${h}&bars=3000`);
     renderBacktest(d);
   } catch (e) {
     box.innerHTML = `<div class="empty">回测失败：${escapeHtml(e.message)}</div>`;
@@ -1061,7 +1428,7 @@ async function openReport() {
   $("rpMeta").textContent = "";
   loadAiStatus();
   try {
-    const d = await api(`/api/report?symbol=${state.symbol}&force=1`);
+    const d = await api(`/api/report?symbol=${apiSym()}&force=1`);
     reportData = d;
     renderReport(d);
   } catch (e) {
@@ -1092,6 +1459,13 @@ function renderReport(d) {
     (d.facts || []).map(x =>
       `<tr><td>${escapeHtml(x.k)}</td><td class="num">${escapeHtml(String(x.v))}</td>
         <td class="muted">${escapeHtml(x.note || "")}</td></tr>`).join("") + "</tbody></table>";
+
+  const coverage = d.coverage || {};
+  if (coverage.note) {
+    const venues = (coverage.venues || []).map(escapeHtml).join("、") || "暂无可用源";
+    h += `<div class="bt-note"><b>数据来源与覆盖</b>　${escapeHtml(coverage.instrument || "行情")} · 成交额 ${Number(coverage.venue_count || 0)} 所（${venues}）<br>` +
+      `清算数据：${escapeHtml(coverage.liquidations || "未知")}。${escapeHtml(coverage.note)}</div>`;
+  }
 
   h += H("多周期结构");
   h += `<table class="rp-tbl"><thead><tr>
@@ -1242,7 +1616,7 @@ async function askAI() {
     const resp = await fetch("/api/ai", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ symbol: state.symbol, question: q }),
+      body: JSON.stringify({ symbol: apiSym(), question: q }),
     });
     if (!resp.ok || !resp.body) {
       let msg = "HTTP " + resp.status;
@@ -1316,6 +1690,45 @@ function handleAiEvent(obj) {
   }
 }
 
+/* ---------------------------------------------------------------- 实时快讯 */
+async function loadNews() {
+  try {
+    const d = await api(`/api/news?tag=${state.newsTag}&limit=80`);
+    renderNews(d);
+  } catch (e) {
+    $("newsBody").innerHTML = `<div class="nd-empty">快讯加载失败：${escapeHtml(e.message)}</div>`;
+  }
+}
+
+const TAG_NAME = { crypto: "加密", stock: "美股", macro: "宏观", other: "其他" };
+
+function renderNews(d) {
+  const items = d.items || [];
+  const c = d.counts || {};
+  $("newsMeta").textContent =
+    `共 ${d.total || 0} 条 · 加密 ${c.crypto || 0} / 美股 ${c.stock || 0} / 宏观 ${c.macro || 0}`;
+  if (!items.length) {
+    $("newsBody").innerHTML = '<div class="nd-empty">暂无快讯</div>';
+    return;
+  }
+  $("newsBody").innerHTML = items.map(it => {
+    const t = new Date(it.ts).toLocaleTimeString("zh-CN",
+      { hour12: false, hour: "2-digit", minute: "2-digit" });
+    const tagCls = `tag-${it.tag || "other"}`;
+    const tagName = TAG_NAME[it.tag] || "其他";
+    const title = escapeHtml(it.title || "");
+    const text = it.url
+      ? `<a href="${escapeHtml(it.url)}" target="_blank" rel="noopener">${title}</a>`
+      : title;
+    return `<div class="nd-item ${it.important ? "important" : ""}" title="${escapeHtml(it.body || it.title || "")}">
+      <span class="t">${t}</span>
+      <span class="src">${escapeHtml(it.source || "")}</span>
+      <span class="ti">${text}</span>
+      <span class="tag ${tagCls}">${tagName}</span>
+    </div>`;
+  }).join("");
+}
+
 /* ---------------------------------------------------------------- 启动 */
 function startPolling() {
   const tick = (fn, ms) => state.timers.push(setInterval(() => { if (!document.hidden) fn(); }, ms));
@@ -1324,6 +1737,7 @@ function startPolling() {
   tick(loadMTF, 45000);
   tick(loadLiqmap, 30000);
   tick(loadHealth, 60000);
+  tick(loadNews, 60000);
   state.timers.push(setInterval(tickCountdown, 1000));
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden) { loadSnapshot(); loadMTF(); }
@@ -1339,6 +1753,7 @@ async function boot() {
   await loadSymbols();
   loadAllSymbols();
   loadHealth();
+  loadNews();
   await Promise.all([loadSnapshot(), loadChart(false), loadMTF(), loadLiqmap()]);
   startPolling();
 }

@@ -71,7 +71,10 @@ def bars_out(bars: dict, limit: int) -> dict:
 
 
 # ---------------------------------------------------------------- 路由
-def api_symbols(_q):
+def api_symbols(q):
+    market = (q.get("market", ["crypto"])[0] or "crypto").lower()
+    if market == "us":
+        return _symbols_us()
     # 6 个标的的 ticker 并行拉取，避免串行等待
     def one(s):
         try:
@@ -83,8 +86,49 @@ def api_symbols(_q):
 
     with ThreadPoolExecutor(max_workers=max(2, len(C.SYMBOLS))) as pool:
         out = list(pool.map(one, C.SYMBOLS))
-    return {"symbols": out, "timeframes": list(C.TIMEFRAMES),
+    return {"symbols": out, "market": "crypto", "timeframes": list(C.TIMEFRAMES),
             "default_tf": C.DEFAULT_TF, "source": C.SOURCE, "build": _build}
+
+
+def _symbols_us():
+    from core import usstock
+    # 个股走新浪批量（一次请求）；指数新浪格式不同，单独走 Yahoo
+    try:
+        quotes = usstock.quotes_batch(list(C.US_SYMBOLS))
+    except Exception:  # noqa: BLE001
+        quotes = {}
+
+    idx_quotes: dict[str, dict] = {}
+
+    def one_index(s):
+        try:
+            return s, usstock.quote(s)
+        except Exception:  # noqa: BLE001
+            return s, {}
+
+    with ThreadPoolExecutor(max_workers=len(C.US_INDICES) or 1) as pool:
+        for s, q in pool.map(one_index, list(C.US_INDICES.keys())):
+            idx_quotes[s] = q
+
+    out = []
+    for s in list(C.US_INDICES.keys()) + list(C.US_SYMBOLS):
+        q = idx_quotes.get(s) or quotes.get(s.upper()) or {}
+        out.append({
+            "symbol": s,
+            "name": C.US_INDICES.get(s) or q.get("name") or s,
+            "last": _round(q.get("last"), 4),
+            "change_pct": _round(q.get("change_pct"), 2),
+            "index": s.startswith("^"),
+        })
+    return {"symbols": out, "market": "us", "timeframes": list(C.US_TIMEFRAMES),
+            "default_tf": "1d", "source": "yahoo", "build": _build}
+
+
+def api_news(q):
+    from core import news
+    tag = q.get("tag", ["all"])[0]
+    limit = max(1, min(int(q.get("limit", ["60"])[0]), 200))
+    return news.fetch(tag, limit)
 
 
 def api_ticker(q):
@@ -273,6 +317,7 @@ def api_health(_q):
 ROUTES = {
     "/api/symbols": api_symbols,
     "/api/symbols/all": api_symbols_all,
+    "/api/news": api_news,
     "/api/liqmap": api_liqmap,
     "/api/ticker": api_ticker,
     "/api/mtf": api_mtf,

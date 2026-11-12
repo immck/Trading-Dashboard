@@ -101,6 +101,7 @@ def build(symbol: str, force: bool = False) -> dict:
         },
         "cards": _cards(snap, mtf, lq),
         "facts": _facts(snap, pos, fg, of, w),
+        "coverage": _coverage(snap),
         "mtf": _mtf_table(rows),
         "levels": {tf: charts[tf] for tf in charts if charts[tf]},
         "liq": _liq_block(lq),
@@ -222,6 +223,19 @@ def _facts(snap, pos, fg, of, w) -> list[dict]:
         {"k": "CVD 累计", "v": _usd(of.get("cvd")), "note": f"1h 买 {_usd(of.get('buy_1h'))} / 卖 {_usd(of.get('sell_1h'))}"},
         {"k": "恐贪指数", "v": str(fg.get("value") or "--"), "note": fg.get("label") or ""},
     ]
+
+
+def _coverage(snap: dict) -> dict:
+    """Expose actual exchange coverage; this dashboard does not aggregate live liquidations."""
+    venues = snap.get("venues") or []
+    names = [v.get("name") for v in venues if v.get("name")]
+    return {
+        "instrument": "USDT 永续合约",
+        "venue_count": len(names),
+        "venues": names,
+        "liquidations": "模型估算",
+        "note": "成交额仅汇总本次成功返回行情的交易所；未覆盖现货，也未接入跨交易所实时爆仓事件。",
+    }
 
 
 def _mtf_table(rows) -> dict:
@@ -489,6 +503,12 @@ def _to_markdown(d: dict) -> str:
     L.append("|---|---|---|")
     for x in d["facts"]:
         L.append(f"| {x['k']} | {x['v']} | {x['note']} |")
+    coverage = d.get("coverage") or {}
+    if coverage:
+        L.append("\n\n## 数据来源与覆盖\n")
+        L.append(f"- 行情口径：{coverage.get('instrument', '--')}")
+        L.append(f"- 成交额来源：{coverage.get('venue_count', 0)} 所（{'、'.join(coverage.get('venues') or []) or '暂无可用源'}）")
+        L.append(f"- 清算数据：{coverage.get('liquidations', '--')}。{coverage.get('note', '')}")
     L.append("\n\n## 多周期结构\n")
     L.append("| 周期 | 得分 | 判定 | 权重 | 主要依据 |")
     L.append("|---|---|---|---|---|")

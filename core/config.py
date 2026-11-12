@@ -27,6 +27,25 @@ BINANCE_SPOT = "https://api.binance.com"
 SYMBOLS = ["BTC", "ETH", "SOL", "BNB", "XRP", "DOGE"]
 QUOTE = "USDT"
 
+# ---------------------------------------------------------------- 美股
+# 用 US: 前缀可以强制按美股解析；不写前缀时，命中下面列表的也会按美股处理
+US_PREFIX = "US:"
+US_SYMBOLS = [
+    "AAPL", "NVDA", "MSFT", "GOOGL", "AMZN", "META", "TSLA", "AVGO", "AMD", "NFLX",
+    "ORCL", "CRM", "ADBE", "QCOM", "MU", "INTC", "PLTR", "COIN", "MSTR", "HOOD",
+    "JPM", "BAC", "GS", "V", "MA", "BRK-B", "UNH", "XOM", "CVX", "WMT",
+    "COST", "PG", "KO", "PEP", "DIS", "BA", "CAT", "GE", "F", "GM",
+    "UBER", "ABNB", "SHOP", "SQ", "SOFI", "RBLX", "SNOW", "SMCI", "ARM", "TSM",
+]
+# 指数（Yahoo 代码）
+US_INDICES = {
+    "^GSPC": "标普 500",
+    "^IXIC": "纳斯达克",
+    "^DJI": "道琼斯",
+    "^VIX": "VIX 恐慌指数",
+}
+US_TIMEFRAMES = ["15m", "30m", "1h", "4h", "1d", "1w"]
+
 # 周期：周期名 -> 秒数（用于缓存 TTL 与共振加权）
 TIMEFRAMES = {
     "15m": 900,
