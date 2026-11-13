@@ -61,11 +61,18 @@
     <!-- ==================== 中栏：K线 ==================== -->
     <section class="center" id="centerPane">
 
+      <div class="event-map-head" id="eventMapHead" hidden>
+        <div class="event-map-title"><span class="event-map-kicker">MARKET SENTIMENT / HISTORICAL EVENTS</span><h1>历史事件</h1><span>沿着比特币周线，回看市场事件与风险传导</span></div>
+        <div class="event-map-stats" id="eventMapStats"></div>
+      </div>
+
       <div class="quote-bar" id="quoteBar"></div>
 
       <div class="center-actions">
         <button class="btn-ask" id="btnWhatIf" title="根据预估清算分布推算目标价触发风险">目标价推演</button>
         <button class="btn-ask" id="btnLiqCalc" title="按开仓价、杠杆和维持保证金估算清算价">爆仓价计算</button>
+        <button class="btn-ask" id="btnNewsMarkers" title="在当前K线上显示快讯事件">新闻标记：开</button>
+        <button class="btn-ask" id="btnEventMap" title="查看完整周线历史事件地图">历史事件地图</button>
         <span class="center-actions-spacer"></span>
         <button class="btn-ask" id="btnToggleGauge" title="收起或展开仪表">收起仪表</button>
         <button class="btn-ask" id="btnResetChart" title="重置图表缩放">重置图表</button>
@@ -76,9 +83,20 @@
 
       <div class="chart-tools" id="chartTools" aria-label="图表工具"></div>
 
+      <div class="ev-bar">
+        <div class="event-map-controls" id="eventMapControls" hidden>
+          <div class="event-filters" id="eventFilters" aria-label="图表事件分类"></div>
+          <div class="event-map-range"><span id="eventMapRange">--</span><button class="btn-ask" id="btnMapLatest">回到最新</button><button class="btn-ask" id="btnMapFit">全历史</button><button class="btn-ask" id="btnExitEventMap">退出地图</button></div>
+          <div class="event-map-legend" id="evLegend"></div>
+        </div>
+        <span class="ev-legend" id="evLegendFallback"></span>
+      </div>
       <div class="chart-wrap">
         <div id="mainChart" class="chart-main"></div>
+        <div class="ev-overlay" id="evOverlay"></div>
+        <div class="news-marker-tooltip" id="newsMarkerTooltip" hidden></div>
         <div class="chart-legend" id="mainLegend"></div>
+        <div class="news-event-info" id="newsEventInfo" hidden></div>
         <div id="subChart" class="chart-sub"></div>
         <div class="chart-legend sub-legend" id="subLegend"></div>
         <div class="loading" id="chartLoading" hidden><div class="spin"></div><span>加载中…</span></div>

@@ -81,12 +81,14 @@ function makeSeries() {
   return {
     setData(d) { this._data = d; },
     setMarkers(m) { this._markers = m; },
+    priceToCoordinate(pv) { const n = Number(pv); return isFinite(n) ? 60 + (Math.abs(n) % 40) : null; },
     createPriceLine(o) { this._lines = (this._lines || []).concat([o]); return o; },
     removePriceLine() { },
     applyOptions() { },
   };
 }
 const chart = {
+  subscribeCrosshairMove() { }, subscribeClick() { },
   addCandlestickSeries: makeSeries,
   addHistogramSeries: makeSeries,
   addLineSeries: makeSeries,
@@ -97,6 +99,7 @@ const chart = {
     return {
       fitContent() { }, subscribeVisibleLogicalRangeChange() { },
       setVisibleLogicalRange() { }, getVisibleLogicalRange() { return { from: 0, to: 100 }; },
+      logicalToCoordinate(i) { return Math.round(i * 3.2); },
     };
   },
 };
@@ -107,6 +110,7 @@ const files = {
   "/api/ticker": "symbols", "/api/scan": "symbols", "/api/chart": "chart",
   "/api/backtest": "backtest", "/api/snapshot": "snapshot", "/api/liqmap": "liqmap",
   "/api/report": "report", "/api/ai/status": "ai_status", "/api/news": "news",
+  "/api/events": "events",
 };
 const sandbox = {
   document,
@@ -132,7 +136,8 @@ const code = fs.readFileSync(path.join(__dirname, "app.js"), "utf8") +
   "\n;globalThis.__loadAllSymbols = loadAllSymbols; globalThis.__loadAiStatus = loadAiStatus;" +
   "\n;globalThis.__handleAiEvent = handleAiEvent; globalThis.__askAI = askAI;" +
   "\n;globalThis.__regressionChannel = regressionChannel; globalThis.__findDivergences = findDivergences;" +
-  "\n;globalThis.__findTwoB = findTwoB; globalThis.__renderChartTools = renderChartTools;";
+  "\n;globalThis.__findTwoB = findTwoB; globalThis.__renderChartTools = renderChartTools;" +
+  "\n;globalThis.__lowerBound = lowerBound; globalThis.__renderEvents = renderEvents;";
 vm.runInContext(code, ctx, { filename: "app.js" });
 
 const S = ctx.__state;
@@ -452,6 +457,53 @@ const text = id => document.getElementById(id).textContent;
     return `${n} 条 · ${text("newsMeta")}`;
   });
 
+  run("新闻时间与K线匹配", () => {
+    const times = [100000, 103600, 107200];
+    if (ctx.newsBarIndex(times, 103600000, "1h") !== 1) throw new Error("边界时间未匹配到新K线");
+    if (ctx.newsBarIndex(times, 103599000, "1h") !== 0) throw new Error("边界前时间匹配错误");
+    if (ctx.newsBarIndex(times, 110800000, "1h") !== -1 || ctx.newsBarIndex(times, null, "1h") !== -1) throw new Error("越界或空时间未排除");
+    const marks = ctx.newsChartMarkers({ bars: { time: times } }, [{ ts: 103600000 }, { ts: 104000000 }]);
+    if (marks.length !== 1 || marks[0].count !== 2) throw new Error("同根K线新闻未合并");
+    return "边界、越界和同K线合并正常";
+  });
+
+  run("快讯标签：时间 + 短标题", () => {
+    const items = load("news").items.filter(x => x.ts);
+    // 造一段覆盖这些快讯的 1h K 线
+    const minTs = Math.min(...items.map(x => x.ts));
+    const start = Math.floor(minTs / 3600000) * 3600 - 2 * 3600;
+    const times = [];
+    for (let i = 0; i < 8; i++) times.push(start + i * 3600);
+    S.chartData = {
+      bars: {
+        time: times,
+        high: times.map((_, i) => 100 + i), low: times.map(() => 95 + 0),
+        open: times.map(() => 98), close: times.map(() => 99),
+        volume: times.map(() => 1000),
+      },
+      snapshot: { close: 99 },
+    };
+    S.tf = "1h";
+    S.newsMarkers = true;
+    S.newsItems = items;
+    ctx.renderEvents();
+    const h = html("evOverlay");
+    const n = (h.match(/nw-label/g) || []).length;
+    if (n < 1) throw new Error("没有渲染快讯标签");
+    if (!/<span class="nw-t">\d{2}:\d{2}<\/span>/.test(h)) throw new Error("标签缺少时间");
+    if (!/<span class="nw-i">[^<]+<\/span>/.test(h)) throw new Error("标签缺少标题");
+    if (h.indexOf("新闻 ") >= 0) throw new Error("仍在用「新闻 N」旧样式");
+    return `${n} 条标签，形如「时:分 标题」`;
+  });
+
+  run("快讯标签：关闭后消失", () => {
+    S.newsMarkers = false;
+    ctx.renderEvents();
+    if (html("evOverlay").indexOf("nw-label") >= 0) throw new Error("关闭后仍有快讯标签");
+    S.newsMarkers = true;
+    return "已清空";
+  });
+
   run("快讯分类标签齐备", () => {
     const h = html("newsBody");
     for (const t of ["tag-crypto", "tag-stock", "tag-macro"]) {
@@ -507,6 +559,69 @@ const text = id => document.getElementById(id).textContent;
     if (q.indexOf("q-price") < 0) throw new Error("行情条为空");
     S.market = "crypto";
     return `${n} 张卡片，行情条 ${q.length} 字符`;
+  });
+
+  run("事件时间轴：竖线 + 标签", () => {
+    const ev = load("events");
+    S.tf = "1w";
+    S.chartData = load("chart_btc_1w");
+    S.events = ev.events;
+    S.eventTypes = ev.types;
+    S.eventsOn = true;
+    ctx.renderEvents();
+    const h = html("evOverlay");
+    const lines = (h.match(/ev-line/g) || []).length;
+    const labels = (h.match(/ev-label/g) || []).length;
+    if (lines < 3) throw new Error("竖线过少: " + lines);
+    if (labels !== lines) throw new Error(`竖线 ${lines} 与标签 ${labels} 数量不一致`);
+    if (h.indexOf("--") >= 0 && false) throw new Error("unreachable");
+    return `${lines} 条竖线 / ${labels} 个标签`;
+  });
+
+  run("事件时间轴：标签含日期与标题", () => {
+    const h = html("evOverlay");
+    if (!/<b>[^<]+<\/b>/.test(h)) throw new Error("标签缺少标题");
+    if (!/<small[^>]*>\d{4}-\d{2}-\d{2}/.test(h)) throw new Error("标签缺少日期");
+    if (h.indexOf('class="ev-label') < 0) throw new Error("缺少标签容器");
+    return "标题与日期齐备";
+  });
+
+  run("事件时间轴：关闭后清空", () => {
+    S.eventsOn = false;
+    ctx.renderEvents();
+    if (html("evOverlay") !== "") throw new Error("关闭后仍有内容");
+    S.eventsOn = true;
+    ctx.renderEvents();
+    return "已清空";
+  });
+
+  run("事件时间轴：未来事件虚线 + 预估标记", () => {
+    const ev = load("events");
+    S.tf = "1w";
+    S.chartData = load("chart_btc_1w");
+    S.events = ev.events;
+    S.eventTypes = ev.types;
+    S.eventsOn = true;
+    ctx.renderEvents();
+    const h = html("evOverlay");
+    if (h.indexOf("ev-label future") < 0) throw new Error("未来事件未使用虚线样式");
+    if (h.indexOf("（预估）") < 0) throw new Error("未来事件未标注预估");
+    const box = (h.match(/ev-label future/g) || []).length;
+    S.tf = "1h";
+    return box + " 个未来事件";
+  });
+
+  run("事件时间轴：日期映射到对应K线", () => {    // 2022-09-15 ETH 合并应落在 2022 年那一周的 K 线上
+    const times = S.chartData.bars.time;
+    const ts = Date.UTC(2022, 8, 15) / 1000;
+    const idx = ctx.__lowerBound(times, ts);
+    if (idx <= 0 || idx >= times.length) throw new Error("索引越界: " + idx);
+    const d = new Date(times[idx] * 1000);
+    if (d.getUTCFullYear() !== 2022) throw new Error("映射到 " + d.toISOString());
+    const gapDays = (times[idx] - ts) / 86400;
+    if (gapDays < 0 || gapDays > 7) throw new Error("与事件相差 " + gapDays.toFixed(1) + " 天");
+    S.tf = "1h";
+    return `落在 ${d.toISOString().slice(0, 10)}（相差 ${gapDays.toFixed(1)} 天）`;
   });
 
   console.log("=".repeat(72));

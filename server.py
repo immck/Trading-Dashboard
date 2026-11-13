@@ -16,8 +16,8 @@ import urllib.parse
 from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from core import (ai, analysis, backtest, config as C, feed, indicators as I, liqmap,
-                  market, patterns as P, report)
+from core import (ai, analysis, backtest, config as C, events, feed, indicators as I,
+                  liqmap, market, patterns as P, report)
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 WEB = os.path.join(ROOT, "web")
@@ -124,6 +124,11 @@ def _symbols_us():
             "default_tf": "1d", "source": "yahoo", "build": _build}
 
 
+def api_events(q):
+    sym = q.get("symbol", ["BTC"])[0]
+    return events.for_symbol(sym)
+
+
 def api_news(q):
     from core import news
     tag = q.get("tag", ["all"])[0]
@@ -173,7 +178,9 @@ def api_chart(q):
     sym = q.get("symbol", ["BTC"])[0]
     tf = q.get("tf", [C.DEFAULT_TF])[0]
     limit = min(int(q.get("limit", [C.SERIES_OUT])[0]), C.MAX_BARS)
-    bars = feed.klines(sym, tf)
+    history = q.get("history", ["0"])[0] == "1"
+    want = min(max(limit, int(q.get("want", [str(C.BARS)])[0])), feed.PAGE_CAP) if history else C.BARS
+    bars = feed.klines(sym, tf, want=want)
     ind = I.compute_all(bars)
     pat = P.detect(bars)
     n = len(bars["close"])
@@ -318,6 +325,7 @@ ROUTES = {
     "/api/symbols": api_symbols,
     "/api/symbols/all": api_symbols_all,
     "/api/news": api_news,
+    "/api/events": api_events,
     "/api/liqmap": api_liqmap,
     "/api/ticker": api_ticker,
     "/api/mtf": api_mtf,
@@ -500,10 +508,19 @@ def main():
     host, port = C.HOST, C.PORT
     print(f"{C.APP_NAME}  build={_build}")
     print(f"  数据源: Binance {C.SOURCE}   标的: {', '.join(C.SYMBOLS)}")
-    print(f"  服务地址: http://{host}:{port}")
-    srv = ThreadingHTTPServer((host, port), Handler)
+
+    try:
+        srv = ThreadingHTTPServer((host, port), Handler)
+    except OSError as e:
+        print(f"\n[启动失败] 无法绑定 {host}:{port} —— {e}")
+        print("  常见原因：端口被占用，或落在 Windows/Hyper-V 的保留段里。")
+        print("  查看保留段: netsh interface ipv4 show excludedportrange protocol=tcp")
+        print("  换端口: 修改 core/config.py 里的 PORT（建议 9101、9200 这类）")
+        raise SystemExit(1)
+
     srv.daemon_threads = True
-    # 先把端口开起来，再在后台预热通道与默认标的
+    print(f"  服务地址: http://{host}:{port}")
+    # 端口已开，再在后台预热通道与默认标的
     threading.Thread(target=feed.warmup, args=(C.SYMBOLS[0], C.DEFAULT_TF),
                      daemon=True).start()
     try:

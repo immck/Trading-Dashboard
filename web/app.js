@@ -18,6 +18,8 @@ const state = {
   overlaySeries: [], subSeries: [], syncing: false, loading: 0,
   nextFunding: 0, timers: [], gaugesHidden: false, chartMaximized: false, chartLiq: true,
   chartTools: { walls: true, reg50: false, reg100: false, reg200: false, divergence: false, twoB: false },
+  newsItems: [], newsMarkers: true, selectedNews: null,
+  events: [], eventTypes: {}, eventsOn: true, eventMapMode: false,
 };
 
 /* ---------------------------------------------------------------- 工具 */
@@ -107,11 +109,16 @@ function initCharts() {
   };
   state.mainChart.timeScale().subscribeVisibleLogicalRangeChange(link(state.mainChart, state.subChart));
   state.subChart.timeScale().subscribeVisibleLogicalRangeChange(link(state.subChart, state.mainChart));
+  // 事件竖线要跟着缩放/平移实时重算
+  state.mainChart.timeScale().subscribeVisibleLogicalRangeChange(() => scheduleEvents());
+  state.mainChart.subscribeCrosshairMove(handleNewsHover);
+  state.mainChart.subscribeClick(handleNewsClick);
 
   const ro = new ResizeObserver(() => {
     if (state.mainChart) state.mainChart.applyOptions({ width: m.clientWidth, height: m.clientHeight });
     if (state.subChart) state.subChart.applyOptions({ width: s.clientWidth, height: s.clientHeight });
     if (state.snap) drawGauges();
+    scheduleEvents();
   });
   ro.observe(m); ro.observe(s);
 }
@@ -142,6 +149,207 @@ function addOverlay(color, vals, opts) {
 
 const MA_COLORS = ["#f0b90b", "#4da6ff", "#c480ff", "#ff9500", "#79c0ff", "#d2a8ff"];
 const EMA_COLORS = ["#39d353", "#2ea043", "#238636", "#196c2e"];
+
+/* ---------------------------------------------------------------- 事件时间轴 */
+const TF_SECONDS = { "15m": 900, "30m": 1800, "1h": 3600, "4h": 14400, "1d": 86400, "1w": 604800 };
+
+function lowerBound(times, ts) {
+  let lo = 0, hi = times.length;
+  while (lo < hi) { const mid = (lo + hi) >> 1; if (times[mid] < ts) lo = mid + 1; else hi = mid; }
+  return lo;
+}
+
+async function loadEvents() {
+  try {
+    const d = await api(`/api/events?symbol=${apiSym()}`);
+    state.events = d.events || [];
+    state.eventTypes = d.types || {};
+    renderEventLegend();
+    scheduleEvents();
+  } catch (e) {
+    state.events = [];
+    $("evLegend").textContent = "事件加载失败";
+    scheduleEvents();
+  }
+}
+
+function renderEventLegend() {
+  const el = $("evLegend");
+  if (!el) return;
+  const used = new Set((state.events || []).map(e => e.type));
+  const types = state.eventTypes || {};
+  el.innerHTML = Object.keys(types)
+    .filter(k => used.has(k))
+    .map(k => `<span><i style="background:${types[k].color}"></i>${types[k].label}</span>`)
+    .join("");
+}
+
+let evRaf = 0;
+function scheduleEvents() {
+  if (evRaf) return;
+  evRaf = requestAnimationFrame(() => { evRaf = 0; renderEvents(); });
+}
+
+/**
+ * 把事件画成竖线 + 顶部标签。
+ * lightweight-charts v4 没有内置竖线，所以用绝对定位的 HTML 覆盖层，
+ * 坐标通过 timeScale().logicalToCoordinate(barIndex) 换算，随缩放平移实时重算。
+ */
+function renderEvents() {
+  const box = $("evOverlay");
+  if (!box) return;
+  const chart = state.mainChart;
+  const d = state.chartData;
+  if (!chart || !d) { box.innerHTML = ""; return; }
+
+  const main = $("mainChart");
+  const w = (main && main.clientWidth) || box.clientWidth || 0;
+  const h = (main && main.clientHeight) || 0;
+  if (w <= 0 || h <= 0) { box.innerHTML = ""; return; }
+  box.style.height = h + "px";
+
+  const ts = chart.timeScale();
+  const out = [];
+  if (state.eventsOn && (state.events || []).length) out.push(...renderEventLines(d, ts, w, h));
+  if (state.newsMarkers && (state.newsItems || []).length) out.push(...renderNewsLabels(d, ts, w, h));
+  box.innerHTML = out.join("");
+}
+
+function eventCategory(ev) {
+  const type = ev.category || ev.type || "other";
+  return ({ macro: "policy", regulation: "policy", etf: "industry", upgrade: "industry", incident: "other", peak: "other" })[type] || type;
+}
+
+/** 历史事件：竖虚线 + 顶部「标题栏 + 日期」双层标签（参考 TradingView/traderax 的画法） */
+function renderEventLines(d, ts, w, h) {
+  const times = d.bars.time;
+  if (!times.length) return [];
+  const lastIdx = times.length - 1;
+  const tfSec = TF_SECONDS[state.tf] || 86400;
+  const BOX_W = 170, BOX_H = 36, GAP = 4;
+  const placed = [];
+  const out = [];
+
+  const items = [];
+  for (const ev of state.events) {
+    if (!enabledEventCategories.has(eventCategory(ev))) continue;
+    const future = ev.time > times[lastIdx];
+    let x = null;
+    if (future) {
+      // 未来事件按周期推算逻辑位置；落到可视区外就贴右边并标注「预估」
+      const steps = Math.ceil((ev.time - times[lastIdx]) / tfSec);
+      try { x = ts.logicalToCoordinate(lastIdx + Math.min(steps, 400)); } catch (e) { x = null; }
+      if (x === null || x === undefined || x > w - 4) x = w - 6;
+    } else {
+      const idx = lowerBound(times, ev.time);
+      if (idx >= times.length) continue;
+      if (times[idx] - ev.time > tfSec * 3) continue;      // 早于数据起点，别硬套到第一根
+      try { x = ts.logicalToCoordinate(idx); } catch (e) { x = null; }
+    }
+    if (x === null || x === undefined || x < -40 || x > w + 40) continue;
+    items.push({ ev, x, future });
+  }
+  items.sort((a, b) => a.x - b.x);
+
+  for (const { ev, x, future } of items) {
+    const color = ev.color || "#8b949e";
+    // 默认放在线右侧，靠右就翻到左侧
+    let left = x + 3;
+    if (left + BOX_W > w - 2) left = Math.max(0, x - BOX_W - 3);
+
+    let top = 4;
+    for (let k = 0; k < 6; k++) {
+      const hit = placed.some(o => !(left + BOX_W < o.x1 || left > o.x2 || top + BOX_H < o.y1 || top > o.y2));
+      if (!hit) break;
+      // 先试翻到另一侧，再不行就往下换行
+      const alt = left === x + 3 ? Math.max(0, x - BOX_W - 3) : x + 3;
+      const altHit = alt + BOX_W <= w && !placed.some(o =>
+        !(alt + BOX_W < o.x1 || alt > o.x2 || top + BOX_H < o.y1 || top > o.y2));
+      if (altHit) { left = alt; break; }
+      top += BOX_H + GAP;
+    }
+    if (top + BOX_H > h - 6) continue;
+    placed.push({ x1: left, x2: left + BOX_W, y1: top, y2: top + BOX_H });
+
+    const title = future ? `${ev.title}（预估）` : ev.title;
+    const date = future ? `${ev.date} 预计` : ev.date;
+    out.push(`<div class="ev-line${future ? " future" : ""}" style="left:${x.toFixed(1)}px;top:${(top + BOX_H).toFixed(1)}px;color:${color}"></div>`);
+    out.push(`<div class="ev-label${future ? " future" : ""}" style="left:${left.toFixed(1)}px;top:${top.toFixed(1)}px;width:${BOX_W}px;color:${color}">
+      <div class="ev-h" style="background:${color}22"><b>${escapeHtml(title || "")}</b></div>
+      <small class="ev-d">${escapeHtml(date || "")}${ev.label ? " · " + escapeHtml(ev.label) : ""}</small>
+    </div>`);
+  }
+  return out;
+}
+
+function truncate(s, n) {
+  s = String(s || "");
+  return s.length > n ? s.slice(0, n) + "…" : s;
+}
+
+function eventEnabled() {
+  return true;
+}
+
+/** 把同一条 K 线上的多条快讯合并，保留最重要/最新的一条 */
+function newsLabelGroups(times, items, tf) {
+  const byIdx = new Map();
+  for (const item of (items || [])) {
+    if (!eventEnabled(item)) continue;
+    const i = newsBarIndex(times, item.ts, tf);
+    if (i < 0) continue;
+    const cur = byIdx.get(i);
+    if (!cur) {
+      byIdx.set(i, { i, best: item, count: 1 });
+    } else {
+      cur.count++;
+      if ((item.important ? 1 : 0) > (cur.best.important ? 1 : 0)) cur.best = item;
+      else if ((item.important ? 1 : 0) === (cur.best.important ? 1 : 0) && item.ts > cur.best.ts) cur.best = item;
+    }
+  }
+  return [...byIdx.values()];
+}
+
+/** 快讯：贴在对应 K 线上方的小标签，只显示「时间 + 短标题」 */
+function renderNewsLabels(d, ts, w, h) {
+  const groups = newsLabelGroups(d.bars.time, state.newsItems, state.tf);
+  if (!groups.length || !state.candleSeries || typeof state.candleSeries.priceToCoordinate !== "function") return [];
+
+  const LABEL_W = 138, LABEL_H = 16;
+  const occ = [];
+  const out = [];
+  groups.sort((a, b) => (b.best.important ? 1 : 0) - (a.best.important ? 1 : 0) || (b.best.ts - a.best.ts));
+
+  for (const g of groups.slice(0, 26)) {
+    const x = ts.logicalToCoordinate(g.i);
+    if (x === null || x === undefined || x < -20 || x > w + 20) continue;
+    let y = null;
+    try { y = state.candleSeries.priceToCoordinate(d.bars.high[g.i]); } catch (e) { y = null; }
+    if (y === null || y === undefined || !isFinite(y)) continue;
+
+    let left = x + 3;
+    if (left + LABEL_W > w) left = Math.max(0, x - LABEL_W - 3);
+    let top = y - 22;
+    for (let k = 0; k < 8; k++) {
+      const hit = occ.some(o => !(left + LABEL_W < o.x1 || left > o.x2 || top + LABEL_H < o.y1 || top > o.y2));
+      if (!hit) break;
+      top -= LABEL_H + 2;
+    }
+    if (top < 0 || top + LABEL_H > h) continue;
+    occ.push({ x1: left, x2: left + LABEL_W, y1: top, y2: top + LABEL_H });
+
+    const t = new Date(g.best.ts).toLocaleTimeString("zh-CN", { hour12: false, hour: "2-digit", minute: "2-digit" });
+    const more = g.count > 1 ? `<i>+${g.count - 1}</i>` : "";
+    const full = g.count > 1
+      ? `${t} ${g.best.title || ""}（同一K线上共 ${g.count} 条快讯）`
+      : `${t} ${g.best.title || ""}`;
+    out.push(`<div class="nw-label nw-${g.best.tag || "other"}" style="left:${left.toFixed(1)}px;top:${top.toFixed(1)}px"
+        title="${escapeHtml(full)}">
+      <span class="nw-t">${t}</span><span class="nw-i">${escapeHtml(truncate(g.best.title || "快讯", 13))}</span>${more}
+    </div>`);
+  }
+  return out;
+}
 
 function renderChart() {
   const d = state.chartData;
@@ -235,6 +443,8 @@ function renderChart() {
   }
   if (state.chartTools.divergence) markers.push(...findDivergences(d).map(x => ({ time: t[x.i], position: x.dir > 0 ? "belowBar" : "aboveBar", color: x.dir > 0 ? C.up : C.down, shape: x.dir > 0 ? "arrowUp" : "arrowDown", text: `RSI背离 ${x.dir > 0 ? "底" : "顶"}` })));
   if (state.chartTools.twoB) markers.push(...findTwoB(d.bars).map(x => ({ time: t[x.i], position: x.dir > 0 ? "belowBar" : "aboveBar", color: x.dir > 0 ? C.up : C.down, shape: x.dir > 0 ? "arrowUp" : "arrowDown", text: `2B${x.dir > 0 ? "多" : "空"}` })));
+  // 快讯不再用圆点标记，改为 evOverlay 里的「时间 + 短标题」标签（见 renderNewsLabels）
+
   markers.sort((a, b) => a.time - b.time);
   state.candleSeries.setMarkers(markers);
 
@@ -259,6 +469,7 @@ function renderChart() {
   setPriceLines(state.liq);
   setWallLines(state.snap);
   applyPivots();
+  scheduleEvents();
 }
 
 const CHART_TOOLS = [
@@ -929,10 +1140,14 @@ async function loadChart(keepView) {
   $("chartLoading").hidden = false;
   try {
     const range = keepView && state.mainChart ? state.mainChart.timeScale().getVisibleLogicalRange() : null;
-    const d = await api(`/api/chart?symbol=${apiSym()}&tf=${state.tf}&limit=320`);
+    const limit = state.eventMapMode ? 1500 : (state.tf === "1w" ? 1200 : (state.tf === "1d" ? 1200 : 320));
+    const historyQuery = state.eventMapMode ? "&history=1&want=1500" : "";
+    const d = await api(`/api/chart?symbol=${apiSym()}&tf=${state.tf}&limit=${limit}${historyQuery}`);
     state.chartData = d;
     renderChart();
-    if (range) { try { state.mainChart.timeScale().setVisibleLogicalRange(range); } catch (e) { /* ignore */ } }
+    if (range && !state.eventMapMode) { try { state.mainChart.timeScale().setVisibleLogicalRange(range); } catch (e) { /* ignore */ } }
+    if (state.eventMapMode) state.mainChart.timeScale().fitContent();
+    updateEventMapStats(d);
     $("hdrStale").hidden = !d.stale;
   } catch (e) {
     console.error(e);
@@ -1141,6 +1356,7 @@ function switchSymbol(sym) {
   loadChart(false);
   loadMTF();
   loadLiqmap();
+  loadEvents();
 }
 
 function switchMarket(mkt) {
@@ -1159,6 +1375,7 @@ function switchMarket(mkt) {
   loadChart(false);
   loadMTF();
   loadLiqmap();
+  loadEvents();
 }
 
 async function loadSymbols() {
@@ -1286,6 +1503,24 @@ function bindUI() {
   };
   $("btnWhatIf").onclick = openWhatIf;
   $("btnLiqCalc").onclick = openLiqCalc;
+  $("btnNewsMarkers").onclick = () => {
+    state.newsMarkers = !state.newsMarkers;
+    $("btnNewsMarkers").textContent = `新闻标记：${state.newsMarkers ? "开" : "关"}`;
+    renderEvents();          // 只重画覆盖层，不必重建整个图表
+  };
+  $("btnEventMap").onclick = () => setEventMapMode(true);
+  $("btnExitEventMap").onclick = () => setEventMapMode(false);
+  $("btnMapLatest").onclick = () => {
+    if (!state.mainChart) return;
+    state.mainChart.timeScale().scrollToRealTime();
+  };
+  $("btnMapFit").onclick = () => {
+    if (state.mainChart) state.mainChart.timeScale().fitContent();
+  };
+  $("newsBody").onclick = e => {
+    const button = e.target.closest("[data-news-index]");
+    if (button) focusNews(Number(button.dataset.newsIndex));
+  };
   $("toolClose").onclick = closeTool;
   $("toolModal").onclick = e => { if (e.target.id === "toolModal") closeTool(); };
   $("btnToggleGauge").onclick = () => {
@@ -1348,6 +1583,7 @@ function bindUI() {
     $("newsToggle").textContent = collapsed ? "展开" : "收起";
     if (state.mainChart) state.mainChart.applyOptions({});
   };
+
 }
 
 /* ---------------------------------------------------------------- 回测 */
@@ -1702,16 +1938,95 @@ async function loadNews() {
 
 const TAG_NAME = { crypto: "加密", stock: "美股", macro: "宏观", other: "其他" };
 
+const EVENT_CATEGORIES = [
+  ["other", "其他事件", "#d5a33c"], ["liquidation", "爆仓事件", "#ff4976"],
+  ["payroll", "非农", "#4da6ff"], ["cpi", "CPI", "#c480ff"], ["ppi", "PPI", "#38c6b0"],
+  ["fed", "美联储利率", "#f0883e"], ["policy", "政策 / 宏观", "#4da6ff"],
+  ["halving", "比特币减半", "#c480ff"], ["industry", "行业", "#38c6b0"],
+  ["security", "安全事件", "#ff4976"],
+];
+const enabledEventCategories = new Set(EVENT_CATEGORIES.map(([id]) => id));
+let eventMapPrevious = null;
+
+function initEventFilters() {
+  const container = $("eventFilters");
+  container.innerHTML = EVENT_CATEGORIES.map(([id, label, color]) => `<label title="筛选历史事件"><input type="checkbox" data-event-category="${id}" ${enabledEventCategories.has(id) ? "checked" : ""}><i style="background:${color}"></i>${label}</label>`).join("");
+  container.onchange = event => {
+    const input = event.target;
+    if (!input.dataset.eventCategory) return;
+    if (input.checked) enabledEventCategories.add(input.dataset.eventCategory);
+    else enabledEventCategories.delete(input.dataset.eventCategory);
+    renderEvents();
+  };
+}
+
+async function setEventMapMode(enabled) {
+  if (enabled && !state.eventMapMode) eventMapPrevious = { market: state.market, symbol: state.symbol, tf: state.tf };
+  state.eventMapMode = enabled;
+  if (enabled) {
+    state.market = "crypto";
+    state.symbol = "BTC";
+    state.tf = "1w";
+    $("symInput").value = "BTC";
+    document.body.classList.add("event-map-mode");
+    $("eventMapHead").hidden = false;
+    $("eventMapControls").hidden = false;
+    document.querySelectorAll("#marketGroup .tb-btn").forEach(b => b.classList.toggle("active", b.dataset.mkt === "crypto"));
+    await loadEvents();
+  } else {
+    if (eventMapPrevious) {
+      state.market = eventMapPrevious.market;
+      state.symbol = eventMapPrevious.symbol;
+      state.tf = eventMapPrevious.tf;
+      $("symInput").value = state.symbol;
+      $("marketGroup").querySelectorAll(".tb-btn").forEach(b => b.classList.toggle("active", b.dataset.mkt === state.market));
+      eventMapPrevious = null;
+    }
+    document.body.classList.remove("event-map-mode");
+    $("eventMapHead").hidden = true;
+    $("eventMapControls").hidden = true;
+  }
+  await loadChart(false);
+  if (!enabled) {
+    loadSymbols();
+    loadSnapshot(); loadMTF(); loadLiqmap();
+  }
+  setTimeout(() => { if (state.mainChart) state.mainChart.applyOptions({}); if (state.subChart) state.subChart.applyOptions({}); }, 0);
+}
+
+function updateEventMapStats(chart) {
+  if (!state.eventMapMode || !chart) return;
+  const events = state.events || [];
+  const historical = events.filter(ev => !ev.date || ev.date <= new Date().toISOString().slice(0, 10));
+  const maxEvent = events.reduce((best, ev) => Number(ev.amount_usd || 0) > Number(best?.amount_usd || 0) ? ev : best, null);
+  const earliest = chart.bars.time.length ? new Date(chart.bars.time[0] * 1000).toISOString().slice(0, 10) : "--";
+  const latest = chart.bars.time.length ? new Date(chart.bars.time.at(-1) * 1000).toISOString().slice(0, 10) : "--";
+  const stats = [
+    ["事件档案", `${historical.length} 条`, "当前本地事件数据"],
+    ["最大爆仓", maxEvent ? `$${usd(maxEvent.amount_usd)}` : "暂无数据", "仅展示有金额来源的记录"],
+    ["K 线范围", `${earliest} — ${latest}`, `${chart.count || 0} 根周线`],
+    ["事件类型", `${new Set(historical.map(ev => ev.category || ev.type)).size} 类`, `最新事件 ${historical.at(-1)?.date || "--"}`],
+  ];
+  $("eventMapStats").innerHTML = stats.map(([label, value, note], i) => `<div class="event-stat"><small>${label}</small><b>${value}</b><span>${note}</span><i>${String(i + 1).padStart(2, "0")}</i></div>`).join("");
+  $("eventMapRange").textContent = `${earliest} — ${latest} · ${chart.count || 0} 根 K 线`;
+}
+
 function renderNews(d) {
   const items = d.items || [];
+  state.newsItems = items;
   const c = d.counts || {};
   $("newsMeta").textContent =
     `共 ${d.total || 0} 条 · 加密 ${c.crypto || 0} / 美股 ${c.stock || 0} / 宏观 ${c.macro || 0}`;
   if (!items.length) {
     $("newsBody").innerHTML = '<div class="nd-empty">暂无快讯</div>';
+    if (state.chartData && state.candleSeries && state.mainChart) {
+      const range = state.mainChart.timeScale().getVisibleLogicalRange();
+      renderChart();
+      if (range) state.mainChart.timeScale().setVisibleLogicalRange(range);
+    }
     return;
   }
-  $("newsBody").innerHTML = items.map(it => {
+  $("newsBody").innerHTML = items.map((it, index) => {
     const t = new Date(it.ts).toLocaleTimeString("zh-CN",
       { hour12: false, hour: "2-digit", minute: "2-digit" });
     const tagCls = `tag-${it.tag || "other"}`;
@@ -1725,8 +2040,84 @@ function renderNews(d) {
       <span class="src">${escapeHtml(it.source || "")}</span>
       <span class="ti">${text}</span>
       <span class="tag ${tagCls}">${tagName}</span>
+      <button class="news-locate" data-news-index="${index}" title="定位到对应K线">定位</button>
     </div>`;
   }).join("");
+  if (state.chartData && state.candleSeries && state.mainChart) {
+    const range = state.mainChart.timeScale().getVisibleLogicalRange();
+    renderChart();
+    if (range) state.mainChart.timeScale().setVisibleLogicalRange(range);
+  }
+}
+
+function newsBarIndex(times, ts, tf) {
+  if (!times || !times.length || ts === null || ts === undefined || !Number.isFinite(Number(ts))) return -1;
+  const seconds = Number(ts) / 1000;
+  const duration = { "15m": 900, "30m": 1800, "1h": 3600, "4h": 14400, "1d": 86400, "1w": 604800 }[tf];
+  if (!duration || seconds < times[0] || seconds >= times[times.length - 1] + duration) return -1;
+  let lo = 0, hi = times.length;
+  while (lo < hi) { const mid = (lo + hi) >> 1; if (times[mid] <= seconds) lo = mid + 1; else hi = mid; }
+  const index = lo - 1;
+  return seconds < times[index] + duration ? index : -1;
+}
+
+function newsChartMarkers(d, items) {
+  // 兼容旧测试：只做分组统计，不再生成图表圆点
+  const grouped = new Map();
+  for (const item of items) {
+    const i = newsBarIndex(d.bars.time, item.ts, state.tf);
+    if (i >= 0) grouped.set(i, (grouped.get(i) || 0) + 1);
+  }
+  return [...grouped].map(([i, count]) => ({ id: `news-${d.bars.time[i]}`, time: d.bars.time[i], count }));
+}
+
+function newsForMarker(id) {
+  if (!state.newsMarkers || typeof id !== "string" || !/^news-\d+$/.test(id) || !state.chartData) return [];
+  const times = state.chartData.bars.time;
+  const time = Number(id.slice(5));
+  return state.newsItems.filter(item => {
+    const index = newsBarIndex(times, item.ts, state.tf);
+    return index >= 0 && times[index] === time;
+  });
+}
+
+function handleNewsHover(param) {
+  const tip = $("newsMarkerTooltip"), items = newsForMarker(param && param.hoveredObjectId);
+  if (!items.length || !param.point) { tip.hidden = true; return; }
+  tip.innerHTML = items.map(item => `<div>${escapeHtml(item.title || "快讯")}</div>`).join("");
+  const width = $("mainChart").clientWidth;
+  tip.style.left = Math.max(4, Math.min(param.point.x + 12, width - 260)) + "px";
+  tip.style.top = Math.max(4, param.point.y + 12) + "px";
+  tip.hidden = false;
+}
+
+function handleNewsClick(param) {
+  const items = newsForMarker(param && param.hoveredObjectId);
+  if (!items.length) return;
+  $("newsMarkerTooltip").hidden = true;
+  openTool("新闻详情", items.map(item => {
+    let url = "";
+    try { const parsed = new URL(item.url); if (["http:", "https:"].includes(parsed.protocol)) url = parsed.href; } catch (e) { /* 无有效原文地址 */ }
+    return `<article class="news-detail"><h3>${escapeHtml(item.title || "快讯")}</h3><div class="news-detail-meta">${escapeHtml(item.source || "未知来源")} · ${escapeHtml(new Date(item.ts).toLocaleString("zh-CN", { hour12: false }))}</div><p>${escapeHtml(item.body || "该来源未提供正文。")}</p>${url ? `<a href="${escapeHtml(url).replace(/"/g, "&quot;")}" target="_blank" rel="noopener noreferrer">打开原始新闻</a>` : '<span class="muted">该来源未提供原文链接</span>'}</article>`;
+  }).join(""));
+}
+
+function focusNews(index) {
+  const item = state.newsItems[index], d = state.chartData;
+  if (!item || !d) return;
+  const i = newsBarIndex(d.bars.time, item.ts, state.tf), info = $("newsEventInfo");
+  info.hidden = false;
+  if (i < 0) {
+    info.innerHTML = `<b>${escapeHtml(item.title || "快讯")}</b><span>该时间不在当前K线范围内，请切换更长周期。</span>`;
+    return;
+  }
+  const open = num(d.bars.open[i]), close = num(d.bars.close[i]);
+  const change = open && close !== null ? (close / open - 1) * 100 : null;
+  const next = i + 1 < d.bars.time.length ? num(d.bars.close[i + 1]) : null;
+  const nextChange = close && next !== null ? (next / close - 1) * 100 : null;
+  info.innerHTML = `<button class="news-info-close" id="closeNewsInfo" title="关闭">×</button><b>${escapeHtml(item.title || "快讯")}</b><span>${escapeHtml(item.source || "")} · ${new Date(item.ts).toLocaleString("zh-CN", {hour12:false})}</span><span>事件所在K线：开 ${fmt(open)} / 收 ${fmt(close)} · ${pct(change)}　下一根：${pct(nextChange)}</span>`;
+  $("closeNewsInfo").onclick = () => { info.hidden = true; };
+  state.mainChart.timeScale().setVisibleLogicalRange({ from: Math.max(0, i - 25), to: i + 25 });
 }
 
 /* ---------------------------------------------------------------- 启动 */
@@ -1746,6 +2137,7 @@ function startPolling() {
 
 async function boot() {
   initCharts();
+  initEventFilters();
   bindUI();
   bindSearch();
   renderToolbar();
@@ -1755,6 +2147,7 @@ async function boot() {
   loadHealth();
   loadNews();
   await Promise.all([loadSnapshot(), loadChart(false), loadMTF(), loadLiqmap()]);
+  await loadEvents();
   startPolling();
 }
 

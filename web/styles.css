@@ -205,6 +205,42 @@ button { font-family: inherit; }
 
 /* 图表 */
 .chart-wrap { flex: 1; min-height: 0; display: flex; flex-direction: column; position: relative; }
+.event-filters { display: flex; flex-wrap: wrap; gap: 4px 12px; padding: 5px 8px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 11px; }
+.event-filters label { display: inline-flex; align-items: center; gap: 3px; white-space: nowrap; cursor: pointer; }
+.event-filters input { margin: 0; accent-color: #49a4ff; }
+.event-map-head { display: flex; align-items: stretch; gap: 12px; padding: 9px 10px; background: #192638; border-bottom: 1px solid #344960; flex-shrink: 0; }
+.event-map-title { display: grid; grid-template-columns: auto 1fr; align-content: center; align-items: baseline; gap: 0 10px; min-width: 280px; }
+.event-map-title .event-map-kicker { grid-column: 1 / -1; color: #69b6ff; font-size: 10px; font-weight: 700; }
+.event-map-title h1 { color: #f0f6fc; font-size: 20px; line-height: 1.4; }
+.event-map-title > span:last-child { color: #9bb2ca; font-size: 11px; }
+.event-map-stats { display: grid; grid-template-columns: repeat(4, minmax(110px, 1fr)); gap: 7px; flex: 1; min-width: 0; }
+.event-stat { position: relative; min-width: 0; display: flex; flex-direction: column; justify-content: center; gap: 1px; padding: 5px 10px; border: 1px solid #334b64; border-radius: 6px; background: #223247; overflow: hidden; }
+.event-stat small, .event-stat span { color: #9cb3cb; font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.event-stat b { color: #f0f6fc; font-size: 17px; line-height: 1.3; font-variant-numeric: tabular-nums; }
+.event-stat i { position: absolute; right: 8px; top: 6px; color: #69b6ff; font-size: 9px; font-style: normal; }
+.event-map-controls { width: 100%; display: flex; flex-direction: column; gap: 3px; }
+.event-map-controls[hidden] { display: none; }
+.event-map-controls .event-filters { min-height: 31px; align-items: center; border: 0; padding: 2px 7px; }
+.event-map-controls .event-filters label { color: #b7c5d5; }
+.event-map-range { display: flex; align-items: center; gap: 6px; padding: 0 7px 4px; color: #8fb5df; font-size: 10px; }
+.event-map-range span { flex: 1; }
+.event-map-range .btn-ask { padding: 2px 8px; font-size: 10px; }
+.event-map-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; border-top: 1px solid var(--line); padding: 4px 7px 2px; color: var(--tx2); font-size: 10px; }
+.event-map-legend i { display: inline-block; width: 7px; height: 7px; margin-right: 4px; border-radius: 50%; }
+.event-map-mode .topbar, .event-map-mode .ai-col, .event-map-mode .right, .event-map-mode .quote-bar,
+.event-map-mode .center-actions, .event-map-mode .gauge-row, .event-map-mode .chart-tools,
+.event-map-mode .trend-strip, .event-map-mode .deriv-strip, .event-map-mode .news-dock { display: none !important; }
+.event-map-mode .center { width: 100%; }
+.event-map-mode .event-map-head { min-height: 86px; }
+.event-map-mode .ev-bar { display: block; padding: 0 8px; background: #192638; }
+.event-map-mode .chart-main { flex: 1 1 auto; }
+.event-map-mode .chart-sub, .event-map-mode .sub-legend { display: none; }
+.event-map-mode .chart-legend:not(.sub-legend) { display: none; }
+@media (max-width: 900px) {
+  .event-map-head { align-items: stretch; flex-direction: column; }
+  .event-map-title { grid-template-columns: 1fr; }
+  .event-map-stats { grid-template-columns: repeat(2, minmax(100px, 1fr)); }
+}
 .chart-main { flex: 1 1 70%; min-height: 0; }
 .chart-sub { flex: 0 0 24%; border-top: 1px solid var(--line); min-height: 0; }
 .chart-legend {
@@ -472,6 +508,61 @@ button { font-family: inherit; }
   height: 168px; flex-shrink: 0; display: flex; flex-direction: column;
   border-top: 1px solid var(--line2); background: var(--bg2);
 }
+
+/* ------------------------------------------------ 事件时间轴 */
+.ev-bar {
+  display: flex; align-items: center; gap: 10px; padding: 2px 10px;
+  border-bottom: 1px solid var(--line); background: var(--bg2); flex-shrink: 0;
+  font-size: 11px; min-height: 22px;
+}
+.ev-toggle { display: flex; align-items: center; gap: 4px; color: var(--tx2); cursor: pointer; white-space: nowrap; }
+.ev-toggle input { accent-color: var(--accent); }
+.ev-legend { display: flex; gap: 8px; flex-wrap: wrap; color: var(--tx2); }
+.ev-legend i {
+  display: inline-block; width: 7px; height: 7px; border-radius: 2px;
+  margin-right: 3px; vertical-align: 0;
+}
+.ev-overlay {
+  position: absolute; left: 0; right: 0; top: 0; height: 70%;
+  pointer-events: none; z-index: 2; overflow: hidden;
+}
+.ev-line {
+  position: absolute; bottom: 0; width: 0;
+  border-left: 1px dashed currentColor; opacity: .5;
+}
+.ev-line.future { border-left-style: dotted; opacity: .35; }
+.ev-label {
+  position: absolute; border: 1px solid currentColor; border-radius: 3px;
+  overflow: hidden; background: #0d1117e6; box-shadow: 0 2px 8px #0009;
+  font-size: 11px; line-height: 1.3; pointer-events: none;
+}
+.ev-label.future { border-style: dashed; opacity: .85; }
+.ev-h { padding: 3px 7px; border-bottom: 1px solid rgba(255, 255, 255, .12); }
+.ev-h b {
+  display: block; color: #fff; font-size: 11px; font-weight: 600;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.ev-d {
+  display: block; padding: 2px 7px 3px; color: currentColor; font-size: 10px;
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis;
+}
+
+/* 快讯标签：贴在对应 K 线上方，只显示「时间 + 短标题」 */
+.nw-label {
+  position: absolute; display: flex; align-items: center; gap: 3px;
+  height: 16px; padding: 0 5px; border-radius: 3px;
+  background: #0d1117e0; border: 1px solid var(--line2); border-left: 2px solid currentColor;
+  font-size: 10px; line-height: 16px; white-space: nowrap; overflow: hidden;
+  pointer-events: none; max-width: 138px;
+}
+.nw-label .nw-t { color: currentColor; font-variant-numeric: tabular-nums; flex-shrink: 0; }
+.nw-label .nw-i { color: #c9d1d9; overflow: hidden; text-overflow: ellipsis; }
+.nw-label i { color: var(--tx2); font-style: normal; flex-shrink: 0; }
+.nw-crypto { color: var(--purple); }
+.nw-stock { color: var(--accent); }
+.nw-macro { color: var(--orange); }
+.nw-other { color: #8b949e; }
 .news-dock.collapsed { height: 32px; }
 .news-dock.collapsed .nd-body { display: none; }
 .nd-head {
@@ -490,10 +581,22 @@ button { font-family: inherit; }
 .nd-head .muted { font-size: 11px; margin-left: auto; }
 .nd-body { flex: 1; overflow-y: auto; padding: 2px 6px 6px; min-height: 0; }
 .nd-item {
-  display: grid; grid-template-columns: 44px 70px 1fr auto;
+  display: grid; grid-template-columns: 44px 70px minmax(0, 1fr) auto auto;
   gap: 8px; align-items: baseline; padding: 3px 6px; border-radius: 4px;
   font-size: 12px; line-height: 1.5;
 }
+.news-locate, .news-info-close { border: 1px solid var(--line); background: var(--bg3); color: var(--accent); cursor: pointer; padding: 1px 5px; font-size: 11px; border-radius: 3px; }
+.news-event-info { position: absolute; top: 30px; left: 8px; z-index: 5; max-width: min(480px, calc(100% - 16px)); padding: 8px 28px 8px 10px; background: #161b22ee; border: 1px solid var(--line); font-size: 11px; display: grid; gap: 3px; }
+.news-event-info b { color: #fff; overflow-wrap: anywhere; }
+.news-event-info span { color: var(--tx2); }
+.news-info-close { position: absolute; right: 5px; top: 5px; }
+.news-marker-tooltip { position: absolute; z-index: 10; max-width: 250px; max-height: 180px; overflow: hidden; pointer-events: none; padding: 7px 9px; background: #1c2333; border: 1px solid #ff9500; border-radius: 4px; color: #fff; font-size: 11px; line-height: 1.5; box-shadow: 0 4px 12px #0008; }
+.news-marker-tooltip div + div { border-top: 1px solid var(--line); margin-top: 4px; padding-top: 4px; }
+.news-detail { padding: 10px 0; border-bottom: 1px solid var(--line); }
+.news-detail h3 { color: #fff; font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; }
+.news-detail-meta { margin: 4px 0; color: var(--tx2); font-size: 11px; }
+.news-detail p { white-space: pre-wrap; overflow-wrap: anywhere; margin: 8px 0; }
+.news-detail a { color: var(--accent); }
 .nd-item:hover { background: var(--bg3); }
 .nd-item .t { color: var(--tx2); font-size: 11px; font-variant-numeric: tabular-nums; }
 .nd-item .src { color: var(--accent); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

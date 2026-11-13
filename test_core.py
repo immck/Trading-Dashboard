@@ -61,9 +61,14 @@ def main():
     manual_rsi = 100 - 100 / (1 + ag / al) if al > 0 else 100
     ok &= check("RSI14 (Wilder)", I._f(ind["rsi"][-1]), round(manual_rsi, 8), 1e-5)
 
-    # 布林带内位置自洽
-    bu, bl = ind["boll"]["upper"][-1], ind["boll"]["lower"][-1]
-    ok &= abs(c[-1] - I._f(ind["boll"]["mid"][-1])) <= (bu - bl) / 2 * 1.01
+    # 布林带结构自洽：上轨 > 中轨 > 下轨，且上下对称
+    # 注意：不要断言「价格落在带内」—— 急涨急跌时价格本来就会突破轨道
+    bu, bl = I._f(ind["boll"]["upper"][-1]), I._f(ind["boll"]["lower"][-1])
+    bm = I._f(ind["boll"]["mid"][-1])
+    band_ok = bool(bl < bm < bu and abs((bu - bm) - (bm - bl)) <= 1e-4 * max(abs(bm), 1))
+    print(f"  [{'OK ' if band_ok else 'FAIL'}] 布林带上下对称            "
+          f"got=({bl:.2f}, {bm:.2f}, {bu:.2f})")
+    ok = ok and band_ok
 
     r = I._f(ind["rsi"][-1])
     print(f"  [{'OK ' if 0 <= r <= 100 else 'FAIL'}] RSI 值域                got={r}")

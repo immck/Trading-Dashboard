@@ -309,6 +309,6 @@ ETH 的盘口深度跨度是 ±0.553%（BTC 是 ±0.178%），说明 **ETH 挂�
 ```bash
 python tools/read.py ETH            # 本文数据来源
 python tools/read.py BTC            # 对照
-curl "http://127.0.0.1:8899/api/mtf?symbol=ETH"
-curl "http://127.0.0.1:8899/api/liqmap?symbol=ETH"
+curl "http://127.0.0.1:9101/api/mtf?symbol=ETH"
+curl "http://127.0.0.1:9101/api/liqmap?symbol=ETH"
 ```
