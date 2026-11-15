@@ -22,6 +22,7 @@ _lock = threading.Lock()
 _running = False
 _attempt = 0.0
 _error = ""
+_panews_fail = 0      # PANews 连续失败次数，达到 3 次就不再重试
 
 
 def category(title: str) -> str:
@@ -226,12 +227,19 @@ def refresh() -> None:
                  parse_fed_calendar, 15),
             )
             for name, source_url, parser, timeout in sources:
+                # PANews 连续失败 3 次后停用，别每轮都白等超时
+                if name == "PANews" and _panews_fail >= 3:
+                    continue
                 try:
                     records = parser(_get(source_url, timeout=timeout, direct=True).decode("utf-8"))
                     if not records:
                         raise ValueError("no calendar records")
                     archive(records)
+                    if name == "PANews":
+                        globals()["_panews_fail"] = 0
                 except Exception as exc:
+                    if name == "PANews":
+                        globals()["_panews_fail"] = _panews_fail + 1
                     errors.append(f"{name}: {exc}")
 
             # 历史回补：BLS 归档页能提供 2008 年至今的 CPI/非农/PPI 发布日
@@ -268,5 +276,6 @@ def refresh() -> None:
 
 
 def status() -> dict:
-    return {"source": "PANews 日历 / 美联储官方日程", "refreshing": _running, "error": _error,
-            "last_attempt": int(_attempt), "archived": len(read())}
+    return {"source": "BLS 官方日程 / 美联储 / PANews", "refreshing": _running, "error": _error,
+            "last_attempt": int(_attempt), "archived": len(read()),
+            "panews_disabled": _panews_fail >= 3}

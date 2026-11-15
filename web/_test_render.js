@@ -466,8 +466,8 @@ const text = id => document.getElementById(id).textContent;
     if (ctx.newsBarIndex(times, 103600000, "1h") !== 1) throw new Error("边界时间未匹配到新K线");
     if (ctx.newsBarIndex(times, 103599000, "1h") !== 0) throw new Error("边界前时间匹配错误");
     if (ctx.newsBarIndex(times, 110800000, "1h") !== -1 || ctx.newsBarIndex(times, null, "1h") !== -1) throw new Error("越界或空时间未排除");
-    const marks = ctx.newsChartMarkers({ bars: { time: times } }, [{ ts: 103600000 }, { ts: 104000000 }]);
-    if (marks.length !== 1 || marks[0].count !== 2) throw new Error("同根K线新闻未合并");
+    const merged = ctx.newsLabelGroups(times, [{ ts: 103600000, title: "a" }, { ts: 104000000, title: "b" }], "1h");
+    if (merged.length !== 1 || merged[0].count !== 2) throw new Error("同根K线新闻未合并");
     return "边界、越界和同K线合并正常";
   });
 

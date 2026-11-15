@@ -21,7 +21,7 @@ VENUES = {
 }
 
 _cache: dict[tuple, tuple[float, dict]] = {}
-TTL = 8
+TTL = 15          # 前端 10 秒轮询，TTL 必须大于轮询间隔，否则缓存永远打空
 
 
 def _r(x, nd=8):

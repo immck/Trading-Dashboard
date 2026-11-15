@@ -112,7 +112,6 @@ function initCharts() {
   state.subChart.timeScale().subscribeVisibleLogicalRangeChange(link(state.subChart, state.mainChart));
   // 事件竖线要跟着缩放/平移实时重算
   state.mainChart.timeScale().subscribeVisibleLogicalRangeChange(() => scheduleEvents());
-  state.mainChart.subscribeCrosshairMove(handleNewsHover);
   state.mainChart.subscribeClick(handleChartClick);
 
   const ro = new ResizeObserver(() => {
@@ -1611,12 +1610,14 @@ function bindUI() {
   };
   $("btnWhatIf").onclick = openWhatIf;
   $("btnLiqCalc").onclick = openLiqCalc;
-  $("btnNewsMarkers").onclick = () => {
-    state.newsMarkers = !state.newsMarkers;
-    $("btnNewsMarkers").textContent = `新闻标记：${state.newsMarkers ? "开" : "关"}`;
-    renderEvents();          // 只重画覆盖层，不必重建整个图表
-  };
-  $("btnEventMap").onclick = () => setEventMapMode(true);
+  const newsToggle = $("newsToggle");
+  if (newsToggle) {
+    newsToggle.checked = state.newsMarkers;
+    newsToggle.onchange = () => {
+      state.newsMarkers = newsToggle.checked;
+      renderEvents();          // 只重画覆盖层，不必重建整个图表
+    };
+  }
   const mapBarBtn = $("btnEventMapBar");
   if (mapBarBtn) mapBarBtn.onclick = () => setEventMapMode(true);
 
@@ -1668,34 +1669,32 @@ function bindUI() {
   };
   $("toolClose").onclick = closeTool;
   $("toolModal").onclick = e => { if (e.target.id === "toolModal") closeTool(); };
-  $("btnToggleGauge").onclick = () => {
-    state.gaugesHidden = !state.gaugesHidden;
-    $("gaugeRow").hidden = state.gaugesHidden;
-    $("btnToggleGauge").textContent = state.gaugesHidden ? "展开仪表" : "收起仪表";
-  };
+  // 面板开关：按钮只加 .on 高亮，文案保持短标签
+  const panelToggles = [
+    ["btnToggleGauge", "gaugesHidden", "gaugeRow"],
+    ["btnToggleChartTools", "chartToolsHidden", "chartTools"],
+    ["btnToggleTrend", "trendHidden", "trendStrip"],
+    ["btnToggleDeriv", "derivHidden", "derivStrip"],
+  ];
+  for (const [btnId, key, rowId] of panelToggles) {
+    const btn = $(btnId), row = $(rowId);
+    if (!btn || !row) continue;
+    state[key] = row.hidden;
+    btn.classList.toggle("on", !row.hidden);
+    btn.onclick = () => {
+      state[key] = !state[key];
+      row.hidden = state[key];
+      btn.classList.toggle("on", !state[key]);
+      setTimeout(() => { if (state.mainChart) state.mainChart.applyOptions({}); }, 0);
+    };
+  }
   $("btnToggleAnalysis").onclick = () => {
     state.analysisHidden = !state.analysisHidden;
     $("aiCol").classList.toggle("collapsed", state.analysisHidden);
     $("btnToggleAnalysis").textContent = state.analysisHidden ? "展开" : "收起";
     $("btnToggleAnalysis").title = state.analysisHidden ? "展开多周期研判" : "收起多周期研判";
   };
-  $("btnToggleChartTools").onclick = () => {
-    state.chartToolsHidden = !state.chartToolsHidden;
-    $("chartTools").hidden = state.chartToolsHidden;
-    $("btnToggleChartTools").textContent = state.chartToolsHidden ? "展开工具" : "收起工具";
-  };
-  $("btnToggleTrend").onclick = () => {
-    state.trendHidden = !state.trendHidden;
-    $("trendStrip").hidden = state.trendHidden;
-    $("btnToggleTrend").textContent = state.trendHidden ? "展开多周期" : "收起多周期";
-    setTimeout(() => { if (state.mainChart) state.mainChart.applyOptions({}); }, 0);
-  };
-  $("btnToggleDeriv").onclick = () => {
-    state.derivHidden = !state.derivHidden;
-    $("derivStrip").hidden = state.derivHidden;
-    $("btnToggleDeriv").textContent = state.derivHidden ? "展开持仓量" : "收起持仓量";
-    setTimeout(() => { if (state.mainChart) state.mainChart.applyOptions({}); }, 0);
-  };
+  
   $("btnResetChart").onclick = () => {
     if (state.mainChart) state.mainChart.timeScale().fitContent();
     if (state.subChart) state.subChart.timeScale().fitContent();
@@ -2135,12 +2134,13 @@ function syncEventMaster() {
 function initEventFilters() {
   const container = $("eventFilters");
   renderMapArchive();
-  container.innerHTML = EVENT_CATEGORIES.map(([id, label, color]) => `<label title="筛选历史事件"><input type="checkbox" data-event-category="${id}" ${enabledEventCategories.has(id) ? "checked" : ""}><i style="background:${color}"></i>${label}</label>`).join("");
+  container.innerHTML = EVENT_CATEGORIES.map(([id, label, color]) => `<label class="${enabledEventCategories.has(id) ? "on" : ""}" title="筛选历史事件"><input type="checkbox" data-event-category="${id}" ${enabledEventCategories.has(id) ? "checked" : ""}><i style="background:${color}"></i>${label}</label>`).join("");
   container.onchange = event => {
     const input = event.target;
     if (!input.dataset.eventCategory) return;
     if (input.checked) enabledEventCategories.add(input.dataset.eventCategory);
     else enabledEventCategories.delete(input.dataset.eventCategory);
+    input.parentElement.classList.toggle("on", input.checked);
     renderEvents();
     renderMapArchive();
     syncEventMaster();
@@ -2161,13 +2161,29 @@ function initEventFilters() {
     state.mainChart.timeScale().setVisibleLogicalRange({from:index - 30,to:index + 30});
     scheduleEvents();
   };
-  $("mapArchiveList").onclick = e => { const row = e.target.closest("[data-archive-index]"); if (row) showEventDetail(Number(row.dataset.archiveIndex)); };
+  $("mapArchiveList").onclick = e => {
+    if (e.target.closest("[data-archive-more]")) {
+      mapArchiveLimit += 150;
+      renderMapArchive();
+      return;
+    }
+    const row = e.target.closest("[data-archive-index]");
+    if (row) showEventDetail(Number(row.dataset.archiveIndex));
+  };
 }
 
+let mapArchiveLimit = 150;
+
 function renderMapArchive() {
-  const records = state.events.map((event,index) => ({event,index})).filter(({event}) => enabledEventCategories.has(eventCategory(event)));
-  $("mapArchiveCount").textContent = `全部时间标记 · ${records.length} 条`;
-  $("mapArchiveList").innerHTML = records.reverse().map(({event,index}) => `<button data-archive-index="${index}"><time>${escapeHtml(event.date || "")}</time><span>${escapeHtml(event.title)}</span><small>${escapeHtml(event.label || "")}</small></button>`).join("");
+  const records = state.events.map((event, index) => ({ event, index }))
+    .filter(({ event }) => enabledEventCategories.has(eventCategory(event)));
+  // 上千条事件一次性铺进 DOM 会卡，先渲染最近 150 条，其余按需加载
+  const shown = records.slice(-mapArchiveLimit).reverse();
+  const more = records.length > mapArchiveLimit;
+  $("mapArchiveCount").textContent = `全部时间标记 · ${records.length} 条` + (more ? `（已显示最近 ${shown.length}）` : "");
+  $("mapArchiveList").innerHTML = shown.map(({ event, index }) =>
+    `<button data-archive-index="${index}"><time>${escapeHtml(event.date || "")}</time><span>${escapeHtml(event.title)}</span><small>${escapeHtml(event.label || "")}</small></button>`).join("")
+    + (more ? `<button class="archive-more" data-archive-more="1">加载更早的 ${Math.min(150, records.length - mapArchiveLimit)} 条</button>` : "");
 }
 
 async function setEventMapMode(enabled) {
@@ -2209,12 +2225,13 @@ function updateEventMapStats(chart) {
   if (!state.eventMapMode || !chart) return;
   const events = state.events || [];
   const historical = events.filter(ev => !ev.date || ev.date <= new Date().toISOString().slice(0, 10));
-  const maxEvent = events.reduce((best, ev) => Number(ev.amount_usd || 0) > Number(best?.amount_usd || 0) ? ev : best, null);
+  const nowSec = Date.now() / 1000;
+  const upcoming = events.filter(ev => ev.time > nowSec).sort((a, b) => a.time - b.time)[0];
   const earliest = chart.bars.time.length ? new Date(chart.bars.time[0] * 1000).toISOString().slice(0, 10) : "--";
   const latest = chart.bars.time.length ? new Date(chart.bars.time.at(-1) * 1000).toISOString().slice(0, 10) : "--";
   const stats = [
     ["事件档案", `${historical.length} 条`, "历史档案 / 日历 / 已归档快讯"],
-    ["最大爆仓", maxEvent ? `$${usd(maxEvent.amount_usd)}` : "暂无数据", "仅展示有金额来源的记录"],
+    ["下次公布", upcoming ? upcoming.date : "暂无", upcoming ? `${upcoming.label || ""} · ${(upcoming.title || "").slice(0, 16)}` : "日历里没有未来日程"],
     ["K 线范围", `${earliest} — ${latest}`, `${chart.count || 0} 根 K 线`],
     ["事件类型", `${new Set(historical.map(ev => ev.category || ev.type)).size} 类`, `最新事件 ${historical.at(-1)?.date || "--"}`],
   ];
@@ -2269,35 +2286,8 @@ function newsBarIndex(times, ts, tf) {
   return seconds < times[index] + duration ? index : -1;
 }
 
-function newsChartMarkers(d, items) {
-  // 兼容旧测试：只做分组统计，不再生成图表圆点
-  const grouped = new Map();
-  for (const item of items) {
-    const i = newsBarIndex(d.bars.time, item.ts, state.tf);
-    if (i >= 0) grouped.set(i, (grouped.get(i) || 0) + 1);
-  }
-  return [...grouped].map(([i, count]) => ({ id: `news-${d.bars.time[i]}`, time: d.bars.time[i], count }));
-}
 
-function newsForMarker(id) {
-  if (!state.newsMarkers || typeof id !== "string" || !/^news-\d+$/.test(id) || !state.chartData) return [];
-  const times = state.chartData.bars.time;
-  const time = Number(id.slice(5));
-  return state.newsItems.filter(item => {
-    const index = newsBarIndex(times, item.ts, state.tf);
-    return index >= 0 && times[index] === time;
-  });
-}
 
-function handleNewsHover(param) {
-  const tip = $("newsMarkerTooltip"), items = newsForMarker(param && param.hoveredObjectId);
-  if (!items.length || !param.point) { tip.hidden = true; return; }
-  tip.innerHTML = items.map(item => `<div>${escapeHtml(item.title || "快讯")}</div>`).join("");
-  const width = $("mainChart").clientWidth;
-  tip.style.left = Math.max(4, Math.min(param.point.x + 12, width - 260)) + "px";
-  tip.style.top = Math.max(4, param.point.y + 12) + "px";
-  tip.hidden = false;
-}
 
 /** 点击 K 线：把这一根上的历史事件与快讯一次性列出来 */
 function barIndexFromClick(param, d) {
@@ -2374,16 +2364,6 @@ function showBarDigest(idx) {
     <h4 class="bd-h">快讯（${news.length}）</h4>${newsHtml}`);
 }
 
-function handleNewsClick(param) {
-  const items = newsForMarker(param && param.hoveredObjectId);
-  if (!items.length) return;
-  $("newsMarkerTooltip").hidden = true;
-  openTool("新闻详情", items.map(item => {
-    let url = "";
-    try { const parsed = new URL(item.url); if (["http:", "https:"].includes(parsed.protocol)) url = parsed.href; } catch (e) { /* 无有效原文地址 */ }
-    return `<article class="news-detail"><h3>${escapeHtml(item.title || "快讯")}</h3><div class="news-detail-meta">${escapeHtml(item.source || "未知来源")} · ${escapeHtml(new Date(item.ts).toLocaleString("zh-CN", { hour12: false }))}</div><p>${escapeHtml(item.body || "该来源未提供正文。")}</p>${url ? `<a href="${escapeHtml(url).replace(/"/g, "&quot;")}" target="_blank" rel="noopener noreferrer">打开原始新闻</a>` : '<span class="muted">该来源未提供原文链接</span>'}</article>`;
-  }).join(""));
-}
 
 function showNewsDetail(item) {
   if (!item) return;

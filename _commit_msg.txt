@@ -1,0 +1,23 @@
+refactor(ui,perf): 清理死代码、修日志噪声、端口自适应、界面重排
+
+修复
+- 删除 news.py 里重复的 CACHE_TTL（45 与 120 并存，后者生效，前者是定时炸弹）
+- _send 把响应头与写体一起包进 try，客户端刷新不再刷 ConnectionAbortedError 堆栈
+- market.TTL 8s -> 15s：前端 10 秒轮询，8 秒缓存永远打空，导致每次 snapshot 都要 900ms
+- 删除死代码：newsChartMarkers / newsForMarker / handleNewsHover / handleNewsClick /
+  .nw-label 样式 / #newsMarkerTooltip
+- 地图「最大爆仓」卡片恒为暂无数据（后端从不产出 amount_usd），改为「下次公布」
+- 「全部时间标记」上千条一次性渲染会卡，改为每次 150 条 + 加载更多
+- PANews 连续失败 3 次后停用，不再每轮白等超时
+- 端口自动挑选（首选 + 后续 20 个），写入 data/port.txt；start.cmd 用 TD_OPEN 让服务自己开浏览器
+
+界面
+- 中栏操作条从 10 个等权按钮改成：2 个主要操作 + 两组分段视图开关（仪表/工具/周期/持仓、重置/最大化）
+- 删除重复的「历史事件地图」按钮，事件地图入口统一放在事件栏
+- 「新闻标记」从按钮改成复选框，与「历史事件」并列
+- 事件分类与指标开关统一成 chips（圆角胶囊 + 选中高亮），选中状态同时用 .on 类与 :has 兜底
+- 修正 .btn-ask 被后续规则覆盖成无边框的问题，统一 6px 圆角与 hover 反馈
+- 顶栏分段控件选中态从实心蓝改为淡色调 + 内描边
+
+工具
+- 新增 tools/check_ids.py：静态校验 JS 引用的元素 id 是否都存在

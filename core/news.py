@@ -19,7 +19,6 @@ from datetime import datetime, timedelta, timezone
 from . import config as C, feed
 
 CN_TZ = timezone(timedelta(hours=8))
-CACHE_TTL = 45
 _cache: dict[str, tuple[float, list]] = {}
 _translation_cache: dict[str, str] = {}
 _translation_lock = threading.Lock()

@@ -71,17 +71,19 @@
       <div class="quote-bar" id="quoteBar"></div>
 
       <div class="center-actions">
-        <button class="btn-ask" id="btnWhatIf" title="根据预估清算分布推算目标价触发风险">目标价推演</button>
-        <button class="btn-ask" id="btnLiqCalc" title="按开仓价、杠杆和维持保证金估算清算价">爆仓价计算</button>
-        <button class="btn-ask" id="btnNewsMarkers" title="在当前K线上显示快讯事件">新闻标记：开</button>
-        <button class="btn-ask" id="btnEventMap" title="查看完整周线历史事件地图">历史事件地图</button>
-        <span class="center-actions-spacer"></span>
-        <button class="btn-ask" id="btnToggleGauge" title="展开或收起仪表">展开仪表</button>
-        <button class="btn-ask" id="btnToggleChartTools" title="展开或收起图表工具">展开工具</button>
-        <button class="btn-ask" id="btnToggleTrend" title="展开或收起多周期卡片">展开多周期</button>
-        <button class="btn-ask" id="btnToggleDeriv" title="展开或收起持仓量卡片">展开持仓量</button>
-        <button class="btn-ask" id="btnResetChart" title="重置图表缩放">重置图表</button>
-        <button class="btn-ask" id="btnMaxChart" title="最大化或还原K线">最大化图表</button>
+        <button class="btn-tool" id="btnWhatIf" title="根据预估清算分布推算目标价触发风险">目标价推演</button>
+        <button class="btn-tool" id="btnLiqCalc" title="按开仓价、杠杆和维持保证金估算清算价">爆仓价计算</button>
+        <span class="ca-spacer"></span>
+        <div class="ca-seg" title="显示 / 隐藏图表周边面板">
+          <button class="btn-ghost" id="btnToggleGauge">仪表</button>
+          <button class="btn-ghost" id="btnToggleChartTools">工具</button>
+          <button class="btn-ghost" id="btnToggleTrend">周期</button>
+          <button class="btn-ghost" id="btnToggleDeriv">持仓</button>
+        </div>
+        <div class="ca-seg">
+          <button class="btn-ghost" id="btnResetChart" title="重置图表缩放">重置</button>
+          <button class="btn-ghost" id="btnMaxChart" title="最大化或还原K线">最大化</button>
+        </div>
       </div>
 
       <div class="gauge-row" id="gaugeRow" hidden></div>
@@ -89,13 +91,19 @@
       <div class="chart-tools" id="chartTools" aria-label="图表工具" hidden></div>
 
       <div class="ev-bar">
-        <label class="ev-toggle" title="在K线上叠加历史事件与快讯">
-          <input type="checkbox" id="evToggle" checked> 历史事件
-        </label>
-        <button class="btn-ask ev-master" id="evMaster" title="一键打开/关闭全部事件分类">事件分类：全开</button>
+        <div class="ev-controls">
+          <label class="ev-toggle" title="在K线上叠加历史事件竖线">
+            <input type="checkbox" id="evToggle" checked> 历史事件
+          </label>
+          <label class="ev-toggle" title="在K线上显示对应时刻的快讯">
+            <input type="checkbox" id="newsToggle" checked> 新闻标记
+          </label>
+          <button class="btn-chip" id="evMaster" title="一键打开 / 关闭全部事件分类">事件分类：全开</button>
+          <span class="ev-legend" id="evLegendFallback"></span>
+          <span class="ca-spacer"></span>
+          <button class="btn-chip" id="btnEventMapBar" title="进入完整的历史事件地图">事件地图</button>
+        </div>
         <div class="event-filters" id="eventFilters" aria-label="事件分类筛选"></div>
-        <span class="ev-legend" id="evLegendFallback"></span>
-        <button class="btn-ask" id="btnEventMapBar" title="进入完整的历史事件地图">事件地图</button>
         <div class="event-map-controls" id="eventMapControls" hidden>
           <div class="map-toolbar"><div><strong>BTC / USD · 历史事件地图</strong><small>按事件实际时间定位 · UTC</small></div><div class="map-options"><label><input id="mapLog" type="checkbox" checked>对数坐标</label><label><input id="mapMA" type="checkbox" checked>MA20</label><label><input id="mapFuture" type="checkbox" checked>未来节点</label><button class="btn-ask" id="mapSelectAll">全选事件</button><button class="btn-ask" id="mapSelectNone">清空事件</button></div></div>
           <div class="event-map-range"><select id="mapTimeframe" aria-label="事件地图周期"><option value="1h">1H</option><option value="4h">4H</option><option value="1d">日线</option><option value="1w" selected>周线</option></select><input id="mapDate" type="date" aria-label="定位日期 UTC"><button class="btn-ask" id="mapLocate">定位日期</button><span id="eventMapRange">--</span><button class="btn-ask" id="btnMapLatest">回到最新</button><button class="btn-ask" id="btnMapFit">全历史</button><button class="btn-ask" id="btnExitEventMap">退出地图</button></div>
@@ -106,7 +114,6 @@
       <div class="chart-wrap">
         <div id="mainChart" class="chart-main"></div>
         <div class="ev-overlay" id="evOverlay"></div>
-        <div class="news-marker-tooltip" id="newsMarkerTooltip" hidden></div>
         <div class="chart-legend" id="mainLegend"></div>
         <div class="news-event-info" id="newsEventInfo" hidden></div>
         <div id="subChart" class="chart-sub"></div>

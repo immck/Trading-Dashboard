@@ -13,6 +13,7 @@ import threading
 import time
 import traceback
 import urllib.parse
+import webbrowser
 from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -354,19 +355,20 @@ class Handler(BaseHTTPRequestHandler):
         use_gzip = accepts_gzip and len(body) > 800 and not ctype.startswith("image/")
         if use_gzip:
             body = gzip.compress(body, 6)
-        self.send_response(code)
-        self.send_header("Content-Type", ctype)
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", cache)
-        if use_gzip:
-            self.send_header("Content-Encoding", "gzip")
-        for k, v in (extra or {}).items():
-            self.send_header(k, v)
-        self.end_headers()
         try:
+            self.send_response(code)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", cache)
+            if use_gzip:
+                self.send_header("Content-Encoding", "gzip")
+            for k, v in (extra or {}).items():
+                self.send_header(k, v)
+            self.end_headers()
             self.wfile.write(body)
-        except (BrokenPipeError, ConnectionResetError):
-            pass
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            # 浏览器刷新/切页会主动断开，这不是错误，别刷日志
+            self.close_connection = True
 
     def _json(self, obj, code: int = 200):
         try:
@@ -391,6 +393,8 @@ class Handler(BaseHTTPRequestHandler):
                 dt = (time.time() - t0) * 1000
                 if dt > 500:
                     print(f"[slow] {path}?{parsed.query} {dt:.0f} ms", flush=True)
+            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+                self.close_connection = True
             except Exception as e:  # noqa: BLE001
                 traceback.print_exc()
                 self._json({"error": str(e), "route": path}, 500)
@@ -505,22 +509,46 @@ class Handler(BaseHTTPRequestHandler):
                 pass
 
 
+def _bind(host: str, preferred: int) -> tuple[ThreadingHTTPServer, int]:
+    """端口可能被占用或落在 Hyper-V 保留段里，自动往后找可用的。"""
+    errors = []
+    for port in [preferred] + [preferred + i for i in range(1, 21)]:
+        try:
+            srv = ThreadingHTTPServer((host, port), Handler)
+            srv.daemon_threads = True
+            return srv, port
+        except OSError as e:
+            errors.append(f"{port}: {e}")
+    print("\n[启动失败] 连续 21 个端口都绑不上 ——")
+    for line in errors[:4]:
+        print("   ", line)
+    print("  查看保留段: netsh interface ipv4 show excludedportrange protocol=tcp")
+    raise SystemExit(1)
+
+
 def main():
-    host, port = C.HOST, C.PORT
+    host = C.HOST
     print(f"{C.APP_NAME}  build={_build}")
     print(f"  数据源: Binance {C.SOURCE}   标的: {', '.join(C.SYMBOLS)}")
 
-    try:
-        srv = ThreadingHTTPServer((host, port), Handler)
-    except OSError as e:
-        print(f"\n[启动失败] 无法绑定 {host}:{port} —— {e}")
-        print("  常见原因：端口被占用，或落在 Windows/Hyper-V 的保留段里。")
-        print("  查看保留段: netsh interface ipv4 show excludedportrange protocol=tcp")
-        print("  换端口: 修改 core/config.py 里的 PORT（建议 19766、9200 这类）")
-        raise SystemExit(1)
+    srv, port = _bind(host, C.PORT)
+    url = f"http://{host}:{port}"
+    print(f"  服务地址: {url}")
+    if port != C.PORT:
+        print(f"  （首选端口 {C.PORT} 不可用，已自动换到 {port}）")
 
-    srv.daemon_threads = True
-    print(f"  服务地址: http://{host}:{port}")
+    # 端口写进文件，方便脚本/其它工具找到当前实例
+    try:
+        os.makedirs(C.DATA_DIR, exist_ok=True)
+        with open(os.path.join(C.DATA_DIR, "port.txt"), "w", encoding="utf-8") as fh:
+            fh.write(str(port))
+    except OSError:
+        pass
+
+    # 双击 start.cmd 时自动开浏览器（端口是动态的，脚本本身没法拼 URL）
+    if os.environ.get("TD_OPEN") == "1":
+        threading.Timer(1.2, lambda: webbrowser.open(url)).start()
+
     # 端口已开，再在后台预热通道与默认标的
     threading.Thread(target=feed.warmup, args=(C.SYMBOLS[0], C.DEFAULT_TF),
                      daemon=True).start()
