@@ -17,7 +17,7 @@ import webbrowser
 from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from core import (ai, analysis, backtest, config as C, event_impact, events, feed,
+from core import (ai, analysis, backtest, coinglass, config as C, event_impact, events, feed,
                   indicators as I, liqmap, market, patterns as P, report)
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -296,6 +296,12 @@ def api_snapshot(q):
     return market.snapshot(sym)
 
 
+def api_liquidations(q):
+    """全网爆仓（Coinglass 页面内嵌数据，无需 key）。"""
+    sym = q.get("symbol", ["BTC"])[0]
+    return coinglass.for_symbol(sym)
+
+
 def api_event_impact(q):
     """事件影响回测：各宏观事件公布当天 / 次日的历史表现。"""
     sym = q.get("symbol", ["BTC"])[0]
@@ -342,6 +348,7 @@ ROUTES = {
     "/api/snapshot": api_snapshot,
     "/api/report": api_report_analysis,
     "/api/event_impact": api_event_impact,
+    "/api/liquidations": api_liquidations,
     "/api/ai/status": api_ai_status,
     "/api/backtest": api_backtest,
     "/api/health": api_health,

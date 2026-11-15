@@ -102,6 +102,13 @@ def build(symbol: str, force: bool = False) -> dict:
     # 外部因子：日历事件 + 消息面
     ext = _external(sym)
 
+    # 全网爆仓（Coinglass），拿不到就降级
+    try:
+        from . import coinglass
+        cg = coinglass.for_symbol(sym)
+    except Exception:  # noqa: BLE001
+        cg = {}
+
     out = {
         "symbol": sym,
         "ts": int(now * 1000),
@@ -115,13 +122,13 @@ def build(symbol: str, force: bool = False) -> dict:
             "summary": mtf.get("summary"),
         },
         "cards": _cards(snap, mtf, lq),
-        "facts": _facts(snap, pos, fg, of, w),
-        "coverage": _coverage(snap),
+        "facts": _facts(snap, pos, fg, of, w, cg),
+        "coverage": _coverage(snap, cg),
         "mtf": _mtf_table(rows),
         "levels": {tf: charts[tf] for tf in charts if charts[tf]},
         "liq": _liq_block(lq),
         "external": ext,
-        "findings": _findings(sym, snap, mtf, lq, charts)
+        "findings": _findings(sym, snap, mtf, lq, charts, cg)
                     + _external_findings(ext, mtf),
         "watch": _watch(snap, mtf, lq, charts) + _external_watch(ext),
         "reliability": _reliability(),
@@ -395,11 +402,11 @@ def _cards(snap, mtf, lq) -> list[dict]:
     ]
 
 
-def _facts(snap, pos, fg, of, w) -> list[dict]:
+def _facts(snap, pos, fg, of, w, cg=None) -> list[dict]:
     price = snap.get("price")
     nd = 6 if price and abs(price) < 1 else 2
     wb, wa = w.get("bid_total") or 0, w.get("ask_total") or 0
-    return [
+    rows = [
         {"k": "价格", "v": _n(price, nd), "note": f"24h {_pct(snap.get('change_pct'))}"},
         {"k": "24h 高/低", "v": f"{_n(snap.get('high'), nd)} / {_n(snap.get('low'), nd)}", "note": ""},
         {"k": "持仓量 OI", "v": _usd(snap.get("oi_usd")), "note": f"24h {_pct(snap.get('oi_change_pct'))}"},
@@ -416,18 +423,34 @@ def _facts(snap, pos, fg, of, w) -> list[dict]:
         {"k": "CVD 累计", "v": _usd(of.get("cvd")), "note": f"1h 买 {_usd(of.get('buy_1h'))} / 卖 {_usd(of.get('sell_1h'))}"},
         {"k": "恐贪指数", "v": str(fg.get("value") or "--"), "note": fg.get("label") or ""},
     ]
+    w24 = ((cg or {}).get("windows") or {}).get("24h") or {}
+    if (cg or {}).get("ok") and w24:
+        rows.append({"k": "24h 爆仓",
+                     "v": f"{_usd(w24.get('long_usd'))} / {_usd(w24.get('short_usd'))}",
+                     "note": "多 / 空 · Coinglass 全网"})
+    return rows
 
 
-def _coverage(snap: dict) -> dict:
-    """Expose actual exchange coverage; this dashboard does not aggregate live liquidations."""
+def _coverage(snap: dict, cg: dict | None = None) -> dict:
+    """说明数据覆盖范围，以及爆仓数据用的是估算还是全网实测。"""
     venues = snap.get("venues") or []
     names = [v.get("name") for v in venues if v.get("name")]
+    cg = cg or {}
+    if cg.get("ok"):
+        w = (cg.get("windows") or {}).get("24h") or {}
+        liq = (f"Coinglass 全网合计 24h：多 {_usd(w.get('long_usd'))} / "
+               f"空 {_usd(w.get('short_usd'))}")
+        note = ("成交额仅汇总本次成功返回行情的交易所；爆仓金额来自 Coinglass 全网汇总，"
+                "价格分布仍是本地模型估算（无公开的逐价位强平数据）。")
+    else:
+        liq = "模型估算"
+        note = "成交额仅汇总本次成功返回行情的交易所；未覆盖现货，也未接入跨交易所实时爆仓事件。"
     return {
         "instrument": "USDT 永续合约",
         "venue_count": len(names),
         "venues": names,
-        "liquidations": "模型估算",
-        "note": "成交额仅汇总本次成功返回行情的交易所；未覆盖现货，也未接入跨交易所实时爆仓事件。",
+        "liquidations": liq,
+        "note": note,
     }
 
 
@@ -471,7 +494,7 @@ def _liq_block(lq) -> dict:
     }
 
 
-def _findings(sym, snap, mtf, lq, charts) -> list[dict]:
+def _findings(sym, snap, mtf, lq, charts, cg=None) -> list[dict]:
     """按数据条件生成「矛盾与辨析」段落。"""
     out = []
     rows = {r["tf"]: r for r in mtf.get("rows", []) if "error" not in r}
@@ -623,6 +646,30 @@ def _findings(sym, snap, mtf, lq, charts) -> list[dict]:
     if not out:
         out.append({"title": "暂无明显矛盾", "tone": 0,
                     "body": "各周期与各维度读数未出现显著冲突，结构相对一致。"})
+    # 爆仓结构：多头/空头被集中清洗
+    w24 = ((cg or {}).get("windows") or {}).get("24h") or {}
+    if (cg or {}).get("ok") and w24:
+        lng = float(w24.get("long_usd") or 0)
+        sht = float(w24.get("short_usd") or 0)
+        tot = lng + sht
+        if tot > 0 and lng / tot >= 0.7:
+            out.append({
+                "title": "多头被集中清洗",
+                "tone": 0,
+                "body": (f"过去 24 小时全网爆仓 {_usd(tot)}，其中多头 {_usd(lng)}"
+                         f"（占 {lng / tot * 100:.0f}%）、空头 {_usd(sht)}。"
+                         f"多头爆仓占绝对多数，说明下跌过程中杠杆多头被强制平仓 —— "
+                         f"这类清洗常伴随超跌反弹，但不改变更大级别的方向。"),
+            })
+        elif tot > 0 and sht / tot >= 0.7:
+            out.append({
+                "title": "空头被集中清洗",
+                "tone": 0,
+                "body": (f"过去 24 小时全网爆仓 {_usd(tot)}，其中空头 {_usd(sht)}"
+                         f"（占 {sht / tot * 100:.0f}%）、多头 {_usd(lng)}。"
+                         f"空头被大面积强平，通常出现在快速拉升中 —— "
+                         f"短期动能强，但追高的风险也在同步放大。"),
+            })
     return out
 
 

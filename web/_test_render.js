@@ -141,7 +141,8 @@ const code = fs.readFileSync(path.join(__dirname, "app.js"), "utf8") +
   "\n;globalThis.__showBarDigest = showBarDigest; globalThis.__eventBarIndex = eventBarIndex;" +
   "\n;globalThis.__barIndexFromClick = barIndexFromClick;" +
   "\n;globalThis.__splitTimeframes = splitTimeframes; globalThis.__enabledCategories = enabledEventCategories;" +
-  "\n;globalThis.__thinByCapacity = thinByCapacity; globalThis.__syncEventMaster = syncEventMaster;";
+  "\n;globalThis.__thinByCapacity = thinByCapacity; globalThis.__syncEventMaster = syncEventMaster;" +
+  "\n;globalThis.__renderLiquidations = renderLiquidations;";
 vm.runInContext(code, ctx, { filename: "app.js" });
 
 const S = ctx.__state;
@@ -695,6 +696,34 @@ const text = id => document.getElementById(id).textContent;
     all.filter(id => id !== "industry").forEach(id => set.add(id));
     ctx.__syncEventMaster();
     return `${on} → ${off} → ${part}`;
+  });
+
+  run("全网爆仓面板：金额、笔数、占比条", () => {
+    const w = (h24, s24, ln, sn) => ({
+      long_usd: h24, short_usd: s24, long_n: ln, short_n: sn,
+      long_ratio: Math.round((h24 / (h24 + s24)) * 1000) / 10,
+    });
+    ctx.__renderLiquidations({
+      ok: true,
+      windows: {
+        "24h": w(471_300_000, 196_500_000, 23931, 9781),
+        "12h": w(28_700_000, 53_400_000, 3502, 2875),
+        "4h": w(13_500_000, 2_300_000, 1580, 282),
+        "1h": w(500_000, 200_000, 88, 66),
+      },
+      total_24h_usd: 667_800_000,
+    });
+    const h = html("cgLiq");
+    if (h.indexOf("471.30M") < 0) throw new Error("缺多头爆仓金额");
+    if (h.indexOf("196.50M") < 0) throw new Error("缺空头爆仓金额");
+    if (h.indexOf("23,931") < 0) throw new Error("缺爆仓笔数");
+    if (h.indexOf("cg-bar") < 0) throw new Error("缺占比条");
+    if (!/width:\s*70\.\d%/.test(h)) throw new Error("多头占比条宽度不对");
+    if (h.indexOf("1h 多") < 0 || h.indexOf("12h 多") < 0) throw new Error("缺分时窗口");
+    // 降级：拿不到数据时给出原因
+    ctx.__renderLiquidations({ ok: false, error: "Coinglass 榜单未收录 XXX" });
+    if (html("cgLiq").indexOf("未收录") < 0) throw new Error("降级提示缺失");
+    return "金额/笔数/占比条/分时窗口 + 降级提示";
   });
 
   run("事件与K线下标映射（日级/分钟级）", () => {    const times = [Date.UTC(2026, 10, 10) / 1000, Date.UTC(2026, 10, 11) / 1000, Date.UTC(2026, 10, 12) / 1000];

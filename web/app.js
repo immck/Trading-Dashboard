@@ -1273,6 +1273,55 @@ async function loadLiqmap() {
   }
 }
 
+/** 全网爆仓：Coinglass 汇总的真实强平金额 */
+async function loadLiquidations() {
+  const box = $("cgLiq");
+  if (!box) return;
+  try {
+    const d = await api(`/api/liquidations?symbol=${apiSym()}`);
+    renderLiquidations(d);
+  } catch (e) {
+    $("cgLegend").textContent = "不可用";
+    box.innerHTML = `<div class="muted">${escapeHtml(e.message)}</div>`;
+  }
+}
+
+function renderLiquidations(d) {
+  const box = $("cgLiq"), legend = $("cgLegend");
+  if (!box) return;
+  if (!d || !d.ok) {
+    if (legend) legend.textContent = "无数据";
+    box.innerHTML = `<div class="muted">${escapeHtml((d && d.error) || "没有拿到爆仓数据")}</div>`;
+    return;
+  }
+  const w = d.windows || {};
+  const d24 = w["24h"] || {};
+  const longUsd = d24.long_usd || 0;
+  const shortUsd = d24.short_usd || 0;
+  const total = longUsd + shortUsd || 1;
+  const longPct = (longUsd / total) * 100;
+  if (legend) legend.textContent = `24h 合计 ${usd(total)}`;
+
+  const row = (name, v, n, cls) => `
+    <div class="cg-row"><span>${name}</span>
+      <b class="${cls}">${usd(v)}</b><span class="n">${n.toLocaleString("en-US")} 笔</span></div>`;
+
+  const short = (key) => {
+    const x = w[key] || {};
+    return `${key} 多 ${usd(x.long_usd || 0)} / 空 ${usd(x.short_usd || 0)}`;
+  };
+
+  box.innerHTML = `
+    ${row("24h 多头爆仓", longUsd, d24.long_n || 0, "down")}
+    ${row("24h 空头爆仓", shortUsd, d24.short_n || 0, "up")}
+    <div class="cg-bar" title="多头爆仓占比 ${longPct.toFixed(1)}%">
+      <i class="down" style="width:${longPct.toFixed(1)}%"></i>
+      <i class="up" style="width:${(100 - longPct).toFixed(1)}%"></i>
+    </div>
+    <div class="cg-small">${short("1h")}<br>${short("4h")}<br>${short("12h")}</div>
+    <div class="cg-note">来源 Coinglass 全网合计 · 多头爆仓多在下跌中发生</div>`;
+}
+
 function renderLiqmap(d) {
   const tb = $("liqTable").querySelector("tbody");
   if (!d || !d.ok) {
@@ -1451,7 +1500,7 @@ function switchSymbol(sym) {
   loadSnapshot();
   loadChart(false);
   loadMTF();
-  loadLiqmap();
+  loadLiqmap(); loadLiquidations();
   loadEvents();
 }
 
@@ -1470,7 +1519,7 @@ function switchMarket(mkt) {
   loadSnapshot();
   loadChart(false);
   loadMTF();
-  loadLiqmap();
+  loadLiqmap(); loadLiquidations();
   loadEvents();
 }
 
@@ -2284,7 +2333,7 @@ async function setEventMapMode(enabled) {
   await loadChart(false);
   if (!enabled) {
     loadSymbols();
-    loadSnapshot(); loadMTF(); loadLiqmap();
+    loadSnapshot(); loadMTF(); loadLiqmap(); loadLiquidations();
   }
   setTimeout(() => { if (state.mainChart) state.mainChart.applyOptions({}); if (state.subChart) state.subChart.applyOptions({}); }, 0);
 }
@@ -2479,6 +2528,7 @@ function startPolling() {
   }, 5000);
   tick(loadMTF, 45000);
   tick(loadLiqmap, 30000);
+  tick(loadLiquidations, 60000);
   tick(loadHealth, 60000);
   tick(loadNews, 30000);
   tick(loadEvents, 300000);
@@ -2499,7 +2549,7 @@ async function boot() {
   loadAllSymbols();
   loadHealth();
   loadNews();
-  await Promise.all([loadSnapshot(), loadChart(false), loadMTF(), loadLiqmap()]);
+  await Promise.all([loadSnapshot(), loadChart(false), loadMTF(), loadLiqmap(), loadLiquidations()]);
   await loadEvents();
   startPolling();
 }

@@ -855,3 +855,15 @@ button { font-family: inherit; }
   font-size: 10px; letter-spacing: .1em; text-transform: uppercase;
   color: #6e7681; margin: 2px 0 6px;
 }
+/* ---- 全网爆仓（Coinglass） ---- */
+.cg-liq { padding: 8px 10px 10px; font-size: 12px; }
+.cg-row { display: grid; grid-template-columns: 1fr auto auto; gap: 8px; align-items: baseline; padding: 2px 0; }
+.cg-row span:first-child { color: var(--tx2); font-size: 11px; }
+.cg-row b { font-variant-numeric: tabular-nums; }
+.cg-row .n { color: #6e7681; font-size: 11px; }
+.cg-bar { display: flex; height: 6px; border-radius: 999px; overflow: hidden; margin: 7px 0 6px; background: var(--bg3); }
+.cg-bar i { display: block; height: 100%; }
+.cg-bar i.down { background: var(--down); }
+.cg-bar i.up { background: var(--up); }
+.cg-small { color: #6e7681; font-size: 10.5px; line-height: 1.6; }
+.cg-note { color: #6e7681; font-size: 10px; margin-top: 5px; }
