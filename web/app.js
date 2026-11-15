@@ -19,8 +19,8 @@ const state = {
   nextFunding: 0, timers: [], analysisHidden: true, gaugesHidden: true, chartToolsHidden: true,
   trendHidden: true, derivHidden: true, chartMaximized: false, chartLiq: false,
   chartTools: { walls: false, reg50: false, reg100: false, reg200: false, divergence: false, twoB: false },
-  newsItems: [], newsMarkers: true, selectedNews: null,
-  events: [], eventTypes: {}, eventsOn: true, eventMapMode: false,
+  newsItems: [], newsMarkers: false, selectedNews: null,
+  events: [], eventTypes: {}, eventsOn: false, eventMapMode: false,
 };
 
 /* ---------------------------------------------------------------- 工具 */
@@ -1667,6 +1667,14 @@ function bindUI() {
       renderEvents();          // 只重画覆盖层，不必重建整个图表
     };
   }
+  const eventToggle = $("evToggle");
+  if (eventToggle) {
+    eventToggle.checked = state.eventsOn;
+    eventToggle.onchange = () => {
+      state.eventsOn = eventToggle.checked;
+      renderEvents();
+    };
+  }
   const mapBarBtn = $("btnEventMapBar");
   if (mapBarBtn) mapBarBtn.onclick = () => setEventMapMode(true);
 
@@ -2234,8 +2242,7 @@ const EVENT_CATEGORIES = [
   ["executive", "高管 / CEO", "#d2a8ff"], ["election", "选举 / 政治", "#3fb950"],
 ];
 // 默认不勾选「行业」：日历归档里有 260+ 条行业快讯，全开会把时间轴淹没
-const enabledEventCategories = new Set(
-  EVENT_CATEGORIES.map(([id]) => id).filter(id => id !== "industry"));
+const enabledEventCategories = new Set();
 let eventMapPrevious = null;
 const mapSettings = {log:true, ma:true, future:true};
 
