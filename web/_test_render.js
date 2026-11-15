@@ -432,7 +432,25 @@ const text = id => document.getElementById(id).textContent;
     if (bars !== 1) throw new Error("情绪条数量异常: " + bars);
     const impacts = (h.match(/rp-impact/g) || []).length;
     if (impacts !== 1) throw new Error("影响判断缺失");
-    return `${(ev.next || []).length} 个未来事件 / 消息面 ${nw.total} 条`;
+    const st = d.external.stats || {};
+    if (!(st.types || []).length) throw new Error("缺事件回测数据");
+    if (h.indexOf("历史上事件公布日的表现") < 0) throw new Error("缺回测小节标题");
+    if (h.indexOf("上涨概率") < 0) throw new Error("缺回测表头");
+    if (h.indexOf("基准：同期日均振幅") < 0) throw new Error("缺基准说明");
+    return `${(ev.next || []).length} 个未来事件 / 消息面 ${nw.total} 条 / 回测 ${st.types.length} 类`;
+  });
+
+  run("事件回测：样本量与统计口径", () => {
+    const d = load("report");
+    const st = d.external.stats;
+    const cpi = (st.types || []).find(t => t.type === "cpi");
+    if (!cpi) throw new Error("缺 CPI 回测行");
+    if (cpi.n < 20) throw new Error("CPI 样本过少: " + cpi.n);
+    if (typeof cpi.mean_pct !== "number" || typeof cpi.up_rate !== "number") throw new Error("统计字段缺失");
+    if (!(cpi.up_rate >= 0 && cpi.up_rate <= 100)) throw new Error("上涨概率越界: " + cpi.up_rate);
+    if (!st.window || !st.window.from) throw new Error("缺样本窗口");
+    if (!(st.baseline || {}).range_pct) throw new Error("缺基准振幅");
+    return `CPI ${cpi.n} 次 · 均值 ${cpi.mean_pct}% · 上涨率 ${cpi.up_rate}%`;
   });
 
   run("研判 Markdown 可用于导出", () => {

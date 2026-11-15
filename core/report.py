@@ -168,6 +168,7 @@ def _external(sym: str) -> dict:
     def brief(e):
         return {"date": e.get("date") or "", "label": e.get("label") or "",
                 "title": e.get("title") or "", "value": e.get("value") or "",
+                "type": e.get("type") or "", "category": e.get("category") or "",
                 "days": round(((e.get("time") or 0) - now) / 86400, 1)}
 
     upcoming = sorted((e for e in rows if (e.get("time") or 0) > now), key=lambda e: e["time"])
@@ -227,6 +228,30 @@ def _external(sym: str) -> dict:
         impact.append("快讯正在首次加载，消息面因子尚未就绪 —— 等快讯栏出数后重新生成研判即可。")
     else:
         impact.append("近 24 小时没有可用快讯，消息面因子本次跳过。")
+
+    # ---------- 历史影响回测 ----------
+    try:
+        from . import event_impact
+        stats = event_impact.compute(sym)
+        block["stats"] = stats if stats.get("ok") else {}
+        if block["stats"]:
+            block["sources"].append(f"事件回测自 {stats['window']['from']}")
+    except Exception:  # noqa: BLE001
+        block["stats"] = {}
+
+    rows = (block.get("stats") or {}).get("types") or []
+    if rows:
+        pick = None
+        if nxt:
+            pick = next((t for t in rows if t["type"] == nxt.get("type")), None)
+        if pick is None:
+            pick = max(rows, key=lambda t: abs(t["mean_pct"]))
+        ratio = f"（是平常日的 {pick['range_ratio']:.1f} 倍）" if pick.get("range_ratio") else ""
+        impact.append(
+            f"历史上 {pick['n']} 次「{pick['label']}」公布当天，{sym} 平均 {pick['mean_pct']:+.2f}%、"
+            f"上涨概率 {pick['up_rate']:.0f}%，当日振幅 {pick['range_pct']:.1f}%{ratio}。"
+            f"这是历史分布，不是对下一次的预测。"
+        )
     return block
 
 
@@ -711,6 +736,17 @@ def _to_markdown(d: dict) -> str:
                 L.append(f"- [{t['source']} · {tone}] {t['title']}")
         for line in ext.get("impact") or []:
             L.append(f"\n> {line}")
+        st = ext.get("stats") or {}
+        if st.get("types"):
+            base = (st.get("baseline") or {}).get("range_pct")
+            L.append(f"\n**历史上事件公布日的表现**（样本自 {st['window']['from']} 起，"
+                     f"基准日均振幅 {base}%）\n")
+            L.append("| 事件 | 次数 | 当天均值 | 上涨概率 | 当日振幅 | / 平日 |")
+            L.append("|---|---|---|---|---|---|")
+            for t in st["types"]:
+                ratio = f"{t['range_ratio']:.1f}x" if t.get("range_ratio") else "--"
+                L.append(f"| {t['label']} | {t['n']} | {t['mean_pct']:+.2f}% | "
+                         f"{t['up_rate']:.0f}% | {t['range_pct']:.2f}% | {ratio} |")
 
     L.append("\n\n## 关键价位\n")
     for tf, c in d["levels"].items():

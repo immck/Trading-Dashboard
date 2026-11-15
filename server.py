@@ -17,8 +17,8 @@ import webbrowser
 from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from core import (ai, analysis, backtest, config as C, events, feed, indicators as I,
-                  liqmap, market, patterns as P, report)
+from core import (ai, analysis, backtest, config as C, event_impact, events, feed,
+                  indicators as I, liqmap, market, patterns as P, report)
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 WEB = os.path.join(ROOT, "web")
@@ -296,6 +296,12 @@ def api_snapshot(q):
     return market.snapshot(sym)
 
 
+def api_event_impact(q):
+    """事件影响回测：各宏观事件公布当天 / 次日的历史表现。"""
+    sym = q.get("symbol", ["BTC"])[0]
+    return event_impact.compute(sym)
+
+
 def api_report_analysis(q):
     """生成当前标的的完整技术研判（含 Markdown 版）。"""
     sym = q.get("symbol", ["BTC"])[0]
@@ -335,6 +341,7 @@ ROUTES = {
     "/api/scan": api_scan,
     "/api/snapshot": api_snapshot,
     "/api/report": api_report_analysis,
+    "/api/event_impact": api_event_impact,
     "/api/ai/status": api_ai_status,
     "/api/backtest": api_backtest,
     "/api/health": api_health,
@@ -552,6 +559,15 @@ def main():
     # 端口已开，再在后台预热通道与默认标的
     threading.Thread(target=feed.warmup, args=(C.SYMBOLS[0], C.DEFAULT_TF),
                      daemon=True).start()
+
+    def _warm_impact():
+        """预热事件回测（要拉 3000 根日线，放后台，别让第一次研判等它）"""
+        try:
+            event_impact.compute(C.SYMBOLS[0])
+        except Exception:  # noqa: BLE001
+            pass
+
+    threading.Timer(3.0, _warm_impact).start()
     try:
         srv.serve_forever()
     except KeyboardInterrupt:

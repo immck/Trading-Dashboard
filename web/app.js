@@ -1948,6 +1948,25 @@ function renderReport(d) {
     if ((ext.impact || []).length) {
       h += `<ul class="rp-impact">` + ext.impact.map(x => `<li>${escapeHtml(x)}</li>`).join("") + `</ul>`;
     }
+    const st = ext.stats || {};
+    if ((st.types || []).length) {
+      h += `<div class="rp-ext-h2">历史上事件公布日的表现 · 样本自 ${escapeHtml((st.window || {}).from || "--")} 起</div>`;
+      h += `<table class="rp-tbl"><thead><tr>
+        <th>事件</th><th class="num">次数</th><th class="num">当天均值</th>
+        <th class="num">上涨概率</th><th class="num">当日振幅</th><th class="num">/ 平日</th>
+        </tr></thead><tbody>`;
+      h += st.types.map(t => `<tr>
+        <td>${escapeHtml(t.label)}</td>
+        <td class="num">${t.n}</td>
+        <td class="num ${toneCls(t.mean_pct)}">${spct(t.mean_pct, 2)}</td>
+        <td class="num">${fx(t.up_rate, 0)}%</td>
+        <td class="num">${fx(t.range_pct, 2)}%</td>
+        <td class="num">${t.range_ratio ? t.range_ratio.toFixed(1) + "x" : "--"}</td>
+      </tr>`).join("");
+      h += `</tbody></table>`;
+      const base = (st.baseline || {}).range_pct;
+      h += `<div class="bt-note">基准：同期日均振幅 ${fx(base, 2)}%。这是历史分布，不是对下一次的预测。</div>`;
+    }
     if ((ext.sources || []).length) {
       h += `<div class="bt-note">数据来源：${escapeHtml(ext.sources.join(" · "))}</div>`;
     }
