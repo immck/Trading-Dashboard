@@ -14,6 +14,18 @@ from . import analysis, feed, liqmap, market
 CACHE_TTL = 45
 _cache: dict[str, tuple[float, dict]] = {}
 
+# 消息面情绪词表：只做粗分类，不用它单独下结论
+BULL_KW = ("上涨", "突破", "新高", "利好", "买入", "增持", "批准", "通过", "降息", "流入",
+           "反弹", "拉升", "暴涨", "看多", "净流入", "rally", "surge", "soar", "approve",
+           "inflow", "record high", "bullish", "gain", "upgrade")
+BEAR_KW = ("下跌", "跌破", "新低", "利空", "抛售", "减持", "禁止", "拒绝", "加息", "流出",
+           "暴跌", "崩盘", "清算", "黑客", "被盗", "延期", "诉讼", "破产", "hack", "exploit",
+           "ban", "reject", "plunge", "slump", "outflow", "bearish", "lawsuit", "selloff")
+
+# 会明显影响风险资产定价的事件分类
+IMPACT_CATEGORIES = {"cpi", "payroll", "ppi", "fed", "halving",
+                     "liquidation", "exchange", "security", "policy"}
+
 
 # ---------------------------------------------------------------- 格式化
 def _n(x, nd=2):
@@ -87,6 +99,9 @@ def build(symbol: str, force: bool = False) -> dict:
     rows = mtf.get("rows", [])
     ok_rows = [r for r in rows if "error" not in r]
 
+    # 外部因子：日历事件 + 消息面
+    ext = _external(sym)
+
     out = {
         "symbol": sym,
         "ts": int(now * 1000),
@@ -105,8 +120,10 @@ def build(symbol: str, force: bool = False) -> dict:
         "mtf": _mtf_table(rows),
         "levels": {tf: charts[tf] for tf in charts if charts[tf]},
         "liq": _liq_block(lq),
-        "findings": _findings(sym, snap, mtf, lq, charts),
-        "watch": _watch(snap, mtf, lq, charts),
+        "external": ext,
+        "findings": _findings(sym, snap, mtf, lq, charts)
+                    + _external_findings(ext, mtf),
+        "watch": _watch(snap, mtf, lq, charts) + _external_watch(ext),
         "reliability": _reliability(),
         "disclaimer": "以上为公开数据与模型规则生成的技术研判，不构成投资建议。"
                       "指标与打分只描述当前结构，不预测拐点。",
@@ -114,6 +131,157 @@ def build(symbol: str, force: bool = False) -> dict:
     out["markdown"] = _to_markdown(out)
     _cache[sym] = (now, out)
     return out
+
+
+def _tone_of(text: str) -> int:
+    """粗粒度情绪：正面词多于负面词算多，反之算空，持平为中性。"""
+    t = (text or "").lower()
+    bull = sum(1 for k in BULL_KW if k in t)
+    bear = sum(1 for k in BEAR_KW if k in t)
+    if bull > bear:
+        return 1
+    if bear > bull:
+        return -1
+    return 0
+
+
+def _external(sym: str) -> dict:
+    """外部因子：日历事件 + 消息面情绪。全部复用项目内已有数据源，不额外抓取。"""
+    now = time.time()
+    block = {
+        "events": {"next": [], "recent": []},
+        "news": {"total": 0, "bull": 0, "bear": 0, "neutral": 0, "window_h": 24, "top": []},
+        "impact": [],
+        "sources": [],
+    }
+
+    try:
+        from . import events as _events
+        data = _events.for_symbol(sym)
+        rows = [e for e in (data.get("events") or [])
+                if e.get("category") in IMPACT_CATEGORIES]
+        block["sources"].append(f"事件日历 {len(rows)} 条")
+    except Exception:  # noqa: BLE001
+        rows = []
+        block["sources"].append("事件日历不可用")
+
+    def brief(e):
+        return {"date": e.get("date") or "", "label": e.get("label") or "",
+                "title": e.get("title") or "", "value": e.get("value") or "",
+                "days": round(((e.get("time") or 0) - now) / 86400, 1)}
+
+    upcoming = sorted((e for e in rows if (e.get("time") or 0) > now), key=lambda e: e["time"])
+    recent = sorted((e for e in rows if 0 < now - (e.get("time") or 0) <= 45 * 86400),
+                    key=lambda e: -e["time"])
+    block["events"]["next"] = [brief(e) for e in upcoming[:5]]
+    block["events"]["recent"] = [brief(e) for e in recent[:5]]
+
+    try:
+        from . import news as _news
+        payload = _news.fetch("all", 80)
+        items = payload.get("items") or []
+        block["sources"].append(f"快讯 {payload.get('total', 0)} 条")
+    except Exception:  # noqa: BLE001
+        items = []
+        payload = {}
+        block["sources"].append("快讯不可用")
+
+    cutoff = (now - 24 * 3600) * 1000
+    fresh = [it for it in items if (it.get("ts") or 0) >= cutoff]
+    bull = bear = 0
+    scored = []
+    for it in fresh:
+        tone = _tone_of((it.get("title") or "") + " " + (it.get("body") or "")[:160])
+        if tone > 0:
+            bull += 1
+        elif tone < 0:
+            bear += 1
+        scored.append((it, tone))
+    block["news"].update({"total": len(fresh), "bull": bull, "bear": bear,
+                          "neutral": len(fresh) - bull - bear})
+    scored.sort(key=lambda x: (0 if x[0].get("important") else 1, -abs(x[1]),
+                               -(x[0].get("ts") or 0)))
+    block["news"]["top"] = [{
+        "title": it.get("title") or "", "source": it.get("source") or "",
+        "ts": int(it.get("ts") or 0), "tone": tone, "tag": it.get("tag") or "other",
+    } for it, tone in scored[:5]]
+
+    impact = block["impact"]
+    nxt = block["events"]["next"][0] if block["events"]["next"] else None
+    if nxt:
+        if nxt["days"] <= 3:
+            impact.append(f"距离「{nxt['label']}」公布只剩 {max(nxt['days'], 0):.0f} 天（{nxt['date']}），"
+                          f"数据公布前后波动通常放大，仓位与止损要留出空间。")
+        else:
+            impact.append(f"最近一个已排期事件：{nxt['date']}「{nxt['label']}」，还有 {nxt['days']:.0f} 天。")
+    if block["news"]["total"]:
+        n = block["news"]["total"]
+        if bull / n >= 0.6:
+            impact.append(f"近 24 小时快讯偏多（{bull}/{n} 条偏正面），消息面只解释情绪，不构成入场依据。")
+        elif bear / n >= 0.6:
+            impact.append(f"近 24 小时快讯偏空（{bear}/{n} 条偏负面），注意与技术面是否同向。")
+        else:
+            impact.append(f"近 24 小时多空混杂（多 {bull} / 空 {bear} / 中性 {len(fresh) - bull - bear}），"
+                          f"消息面没有明确方向。")
+    elif payload.get("warming"):
+        impact.append("快讯正在首次加载，消息面因子尚未就绪 —— 等快讯栏出数后重新生成研判即可。")
+    else:
+        impact.append("近 24 小时没有可用快讯，消息面因子本次跳过。")
+    return block
+
+
+def _external_findings(ext: dict, mtf: dict) -> list[dict]:
+    """把外部因子与技术的矛盾点写成「矛盾与辨析」条目。"""
+    out: list[dict] = []
+    news = ext.get("news") or {}
+    total = news.get("total") or 0
+    bull = news.get("bull") or 0
+    bear = news.get("bear") or 0
+    wscore = mtf.get("weighted_score") or 0
+
+    if total >= 8:
+        ratio = (bull - bear) / total
+        if ratio >= 0.4 and wscore <= -10:
+            out.append({
+                "title": "消息面偏多，技术面偏空",
+                "tone": 0,
+                "body": (f"近 24 小时 {total} 条快讯中正面 {bull} 条、负面 {bear} 条，情绪偏多；"
+                         f"但多周期加权得分 {wscore:+.1f} 偏空。消息面常领先价格 1~2 天，"
+                         f"也可能是利好已被提前消化 —— 这种背离更适合等价格自己确认，而不是提前站队。"),
+            })
+        elif ratio <= -0.4 and wscore >= 10:
+            out.append({
+                "title": "消息面偏空，技术面偏多",
+                "tone": 0,
+                "body": (f"近 24 小时 {total} 条快讯中正面 {bull} 条、负面 {bear} 条，情绪偏空；"
+                         f"但多周期加权得分 {wscore:+.1f} 仍偏多。要么利空已被消化，"
+                         f"要么价格还没反映 —— 两种情况下都不宜只凭其中一边下判断。"),
+            })
+
+    nxt = (ext.get("events") or {}).get("next") or []
+    if nxt and nxt[0]["days"] <= 2:
+        e = nxt[0]
+        out.append({
+            "title": "临近数据公布",
+            "tone": 0,
+            "body": (f"{e['date']} 将公布「{e['label']}」，距今不到 2 天。"
+                     f"数据公布前技术形态容易失真（缩量、假突破），这段时间的信号权重应下调，"
+                     f"止损也不宜贴得太紧。"),
+        })
+    return out
+
+
+def _external_watch(ext: dict) -> list[dict]:
+    items: list[str] = []
+    for e in (ext.get("events") or {}).get("next") or []:
+        when = f"{e['date']}（{max(e['days'], 0):.0f} 天后）" if e["days"] >= 0 else e["date"]
+        items.append(f"{when} {e['label']} · {e['title']}")
+    if not items:
+        items.append("日历里暂无已排期的宏观事件")
+    for n in ((ext.get("news") or {}).get("top") or [])[:3]:
+        tone = "偏多" if n["tone"] > 0 else "偏空" if n["tone"] < 0 else "中性"
+        items.append(f"[{n['source']} · {tone}] {n['title'][:60]}")
+    return [{"title": "外部因子", "items": items}]
 
 
 def _chart_brief(sym: str, tf: str) -> dict:
@@ -519,6 +687,31 @@ def _to_markdown(d: dict) -> str:
         tops = "、".join(("多" if t["dir"] > 0 else "空" if t["dir"] < 0 else "·") + t["label"]
                         for t in r["top"] if t["dir"] != 0)
         L.append(f"| {r['tf']} | {r['score']:+.1f} | {r['verdict']} | {r['weight']} | {tops} |")
+    ext = d.get("external") or {}
+    ext_ev = ext.get("events") or {}
+    ext_nw = ext.get("news") or {}
+    if ext_ev.get("next") or ext_ev.get("recent") or ext_nw.get("total"):
+        L.append("\n\n## 外部因子（新闻 / 事件）\n")
+        if ext_ev.get("next"):
+            L.append("**未来已排期**\n")
+            for e in ext_ev["next"]:
+                val = f"（{e['value']}）" if e.get("value") else ""
+                L.append(f"- {e['date']}（{max(e['days'], 0):.0f} 天后）{e['label']} · {e['title']}{val}")
+        if ext_ev.get("recent"):
+            L.append("\n**最近 45 天已公布**\n")
+            for e in ext_ev["recent"]:
+                val = f"（{e['value']}）" if e.get("value") else ""
+                L.append(f"- {e['date']} {e['label']} · {e['title']}{val}")
+        if ext_nw.get("total"):
+            L.append(f"\n**消息面（近 {ext_nw.get('window_h', 24)} 小时 {ext_nw['total']} 条）**："
+                     f"偏多 {ext_nw.get('bull', 0)} / 偏空 {ext_nw.get('bear', 0)} / "
+                     f"中性 {ext_nw.get('neutral', 0)}\n")
+            for t in ext_nw.get("top") or []:
+                tone = "偏多" if t["tone"] > 0 else "偏空" if t["tone"] < 0 else "中性"
+                L.append(f"- [{t['source']} · {tone}] {t['title']}")
+        for line in ext.get("impact") or []:
+            L.append(f"\n> {line}")
+
     L.append("\n\n## 关键价位\n")
     for tf, c in d["levels"].items():
         vp = c.get("vp") or {}

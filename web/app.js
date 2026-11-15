@@ -1904,6 +1904,55 @@ function renderReport(d) {
     </div>`;
   }).join("") + "</div>";
 
+  const ext = d.external || {};
+  const extEv = ext.events || {};
+  const extNw = ext.news || {};
+  if ((extEv.next || []).length || (extEv.recent || []).length || extNw.total) {
+    h += H("外部因子 · 新闻与事件");
+    const evRows = (arr, isNext) => (arr || []).map(e => `
+      <li><time>${escapeHtml(e.date)}</time>
+        <b>${escapeHtml(e.label || "")}</b>
+        <span class="ti">${escapeHtml(e.title || "")}${e.value ? ` · ${escapeHtml(e.value)}` : ""}</span>
+        ${isNext ? `<i>${Math.max(0, Math.round(e.days))} 天后</i>` : ""}</li>`).join("");
+    h += `<div class="rp-ext">
+      <div class="rp-ext-col"><div class="rp-ext-h">未来已排期</div>
+        <ul>${evRows(extEv.next, true) || '<li class="muted">暂无已排期事件</li>'}</ul></div>
+      <div class="rp-ext-col"><div class="rp-ext-h">最近已公布</div>
+        <ul>${evRows(extEv.recent, false) || '<li class="muted">近期没有公布记录</li>'}</ul></div>
+    </div>`;
+
+    if (extNw.total) {
+      const tot = extNw.total || 1;
+      const pctOf = v => Math.max(0, Math.round(((v || 0) / tot) * 100));
+      h += `<div class="rp-senti">
+        <div class="rp-senti-h">消息面 · 近 ${extNw.window_h || 24} 小时 ${extNw.total} 条</div>
+        <div class="rp-senti-bar">
+          <i class="up" style="width:${pctOf(extNw.bull)}%"></i>
+          <i class="neu" style="width:${pctOf(extNw.neutral)}%"></i>
+          <i class="down" style="width:${pctOf(extNw.bear)}%"></i>
+        </div>
+        <div class="rp-senti-legend">
+          <span class="up">偏多 ${extNw.bull || 0}</span>
+          <span>中性 ${extNw.neutral || 0}</span>
+          <span class="down">偏空 ${extNw.bear || 0}</span>
+        </div>
+      </div>`;
+      h += `<ul class="rp-ext-news">` + (extNw.top || []).map(t => {
+        const cls = t.tone > 0 ? "up" : t.tone < 0 ? "down" : "";
+        const tag = t.tone > 0 ? "偏多" : t.tone < 0 ? "偏空" : "中性";
+        return `<li><span class="tag ${cls}">${tag}</span>
+          <span class="src">${escapeHtml(t.source || "")}</span>
+          <span class="ti">${escapeHtml(t.title || "")}</span></li>`;
+      }).join("") + `</ul>`;
+    }
+    if ((ext.impact || []).length) {
+      h += `<ul class="rp-impact">` + ext.impact.map(x => `<li>${escapeHtml(x)}</li>`).join("") + `</ul>`;
+    }
+    if ((ext.sources || []).length) {
+      h += `<div class="bt-note">数据来源：${escapeHtml(ext.sources.join(" · "))}</div>`;
+    }
+  }
+
   const lq = d.liq || {};
   if (lq.ok) {
     h += H("多空损（预估清算）");

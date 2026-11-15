@@ -407,8 +407,32 @@ const text = id => document.getElementById(id).textContent;
     const findings = (h.match(/rp-finding/g) || []).length;
     if (findings < 3) throw new Error("矛盾点过少: " + findings);
     if (!h.includes("成交额 2 所") || !h.includes("模型估算")) throw new Error("数据覆盖说明缺失");
+    if (h.indexOf("外部因子") < 0) throw new Error("缺外部因子章节");
+    if (h.indexOf("rp-ext") < 0) throw new Error("缺事件列表");
+    if (h.indexOf("rp-senti-bar") < 0) throw new Error("缺消息面情绪条");
+    if (h.indexOf("rp-impact") < 0) throw new Error("缺影响判断");
     if (!text("rpMeta")) throw new Error("标题栏为空");
     return `${sections} 章节 / ${cards} 卡片 / ${findings} 条辨析 / ${h.length} 字符`;
+  });
+
+  run("研判外部因子：事件与新闻都进正文", () => {
+    const d = load("report");
+    if (!d.external) throw new Error("fixture 缺 external");
+    ctx.renderReport(d);
+    const h = html("rpBody");
+    const ev = d.external.events || {};
+    const nw = d.external.news || {};
+    if (!(ev.next || []).length) throw new Error("没有未来事件");
+    if (!(ev.recent || []).length) throw new Error("没有近期事件");
+    if (!nw.total) throw new Error("没有消息面数据");
+    if (h.indexOf("未来已排期") < 0 || h.indexOf("最近已公布") < 0) throw new Error("事件分组标题缺失");
+    if (h.indexOf("天后") < 0) throw new Error("未来事件缺倒计时");
+    if (h.indexOf("消息面 · 近") < 0) throw new Error("消息面标题缺失");
+    const bars = (h.match(/rp-senti-bar/g) || []).length;
+    if (bars !== 1) throw new Error("情绪条数量异常: " + bars);
+    const impacts = (h.match(/rp-impact/g) || []).length;
+    if (impacts !== 1) throw new Error("影响判断缺失");
+    return `${(ev.next || []).length} 个未来事件 / 消息面 ${nw.total} 条`;
   });
 
   run("研判 Markdown 可用于导出", () => {
