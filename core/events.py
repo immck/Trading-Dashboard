@@ -37,21 +37,21 @@ DEFAULT_TYPES = {
 EVENT_CATEGORIES = {
     "liquidation": {"label": "爆仓事件", "color": "#ff4976"},
     "payroll": {"label": "非农", "color": "#4da6ff"},
-    "cpi": {"label": "CPI", "color": "#c480ff"},
+    "cpi": {"label": "CPI", "color": "#ff9f45"},
     "ppi": {"label": "PPI", "color": "#38c6b0"},
-    "fed": {"label": "美联储利率", "color": "#f0883e"},
-    "policy": {"label": "政策 / 宏观", "color": "#4da6ff"},
-    "macro": {"label": "政策 / 宏观", "color": "#4da6ff"},
-    "halving": {"label": "比特币减半", "color": "#c480ff"},
-    "industry": {"label": "行业", "color": "#38c6b0"},
-    "security": {"label": "安全事件", "color": "#ff4976"},
-    "exchange": {"label": "交易所暴雷", "color": "#ff4976"},
-    "executive": {"label": "高管 / CEO", "color": "#f0883e"},
-    "election": {"label": "选举 / 政治", "color": "#4da6ff"},
+    "fed": {"label": "美联储利率", "color": "#c480ff"},
+    "policy": {"label": "政策 / 宏观", "color": "#8b9dff"},
+    "macro": {"label": "政策 / 宏观", "color": "#8b9dff"},
+    "halving": {"label": "比特币减半", "color": "#f0b90b"},
+    "industry": {"label": "行业", "color": "#6e7681"},
+    "security": {"label": "安全事件", "color": "#ffa198"},
+    "exchange": {"label": "交易所暴雷", "color": "#f85149"},
+    "executive": {"label": "高管 / CEO", "color": "#d2a8ff"},
+    "election": {"label": "选举 / 政治", "color": "#3fb950"},
     "incident": {"label": "其他事件", "color": "#d5a33c"},
-    "etf": {"label": "行业", "color": "#38c6b0"},
-    "upgrade": {"label": "行业", "color": "#38c6b0"},
-    "regulation": {"label": "政策 / 宏观", "color": "#4da6ff"},
+    "etf": {"label": "行业", "color": "#6e7681"},
+    "upgrade": {"label": "行业", "color": "#6e7681"},
+    "regulation": {"label": "政策 / 宏观", "color": "#8b9dff"},
     "peak": {"label": "其他事件", "color": "#d5a33c"},
     "other": {"label": "其他事件", "color": "#d5a33c"},
 }
@@ -138,13 +138,33 @@ def for_symbol(symbol: str, exclude: list[str] | None = None) -> dict:
                 "brief": ev.get("brief") or "",
                 "type": etype,
                 "category": category,
-                "color": ev.get("color") or meta.get("color") or "#8b949e",
+                "color": (ev.get("color") or EVENT_CATEGORIES[category]["color"]
+                          or meta.get("color") or "#8b949e"),
                 "label": EVENT_CATEGORIES[category]["label"],
                 "source": ev.get("source") or "历史事件档案",
                 "url": ev.get("url") or "",
+                "value": ev.get("value") or "",
                 "scheduled": bool(ev.get("scheduled")),
             })
         base.sort(key=lambda x: x["time"])
+        # 同一天同一指标可能既有官方日程又有新闻快讯，保留官方那条
+        CAL_TYPES = {"cpi", "payroll", "ppi", "fed"}
+        keep: dict[tuple, dict] = {}
+        deduped = []
+        for item in base:
+            if item["type"] not in CAL_TYPES:
+                deduped.append(item)
+                continue
+            key = (item["type"], (item.get("date") or "")[:10])
+            cur = keep.get(key)
+            if cur is None:
+                keep[key] = item
+                deduped.append(item)
+            elif (cur.get("source") != "BLS 官方发布日程"
+                  and item.get("source") == "BLS 官方发布日程"):
+                deduped[deduped.index(cur)] = item
+                keep[key] = item
+        base = deduped
         types_meta = data["types"]
         cal = calendar_feed.status()
         _cache[sym] = (now, (base, types_meta, cal))

@@ -128,9 +128,11 @@ def archive(records: list[dict]) -> None:
 def read() -> list[dict]:
     try:
         with open(FILE, encoding="utf-8") as handle:
-            return json.load(handle)
+            rows = json.load(handle)
     except (OSError, ValueError):
         return []
+    from . import bls_stats
+    return bls_stats.decorate(rows)
 
 
 def parse_bls_archive(text: str, etype: str, label: str) -> list[dict]:
@@ -143,12 +145,16 @@ def parse_bls_archive(text: str, etype: str, label: str) -> list[dict]:
     for match in re.finditer(r"archives/" + slug + r"_(\d{2})(\d{2})(\d{4})\.htm", text):
         month, day, year = match.groups()
         date = f"{year}-{month}-{day}"
+        # 发布日 N 号公布的是「上个月」的数据
+        ref_year, ref_month = int(year), int(month) - 1
+        if ref_month == 0:
+            ref_year, ref_month = ref_year - 1, 12
         found[f"bls-{etype}-{date}"] = {
             "id": f"bls-{etype}-{date}",
             "date": date,
             "time": int(datetime.strptime(date, "%Y-%m-%d").replace(
                 tzinfo=timezone.utc).timestamp()) + 8 * 3600,
-            "title": f"{label}（{year}年{int(month)}月数据）",
+            "title": f"{label}（{ref_year}年{ref_month}月数据）",
             "brief": "美国劳工统计局（BLS）官方发布日；日期取自新闻稿归档。",
             "type": etype, "scope": "all", "source": "BLS 官方发布日程",
             "url": "https://www.bls.gov/bls/news-release/",

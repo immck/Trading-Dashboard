@@ -339,9 +339,15 @@ function renderEventLines(d, ts, w, h) {
     out.push(`<div class="ev-line${future ? " future" : ""}" style="left:${x.toFixed(1)}px;top:${(top + BOX_H).toFixed(1)}px;color:${color}"></div>`);
     const priceY = state.candleSeries.priceToCoordinate(d.bars.close[Math.max(0, Math.min(lastIdx, lowerBound(times, ev.time + 1) - 1))]);
     if (!future && priceY !== null) out.push(`<span class="ev-price-dot" style="left:${x.toFixed(1)}px;top:${priceY.toFixed(1)}px;background:${color}"></span>`);
-    out.push(`<div class="ev-label${future ? " future" : ""}" data-event-detail-index="${state.events.indexOf(ev)}" role="button" tabindex="0" style="left:${left.toFixed(1)}px;top:${top.toFixed(1)}px;width:${BOX_W}px;color:${color}">
-      <div class="ev-h" style="background:${color}22"><b>${escapeHtml(title || "")}</b></div>
-      <small class="ev-d">${escapeHtml(date || "")}${ev.label ? " · " + escapeHtml(ev.label) : ""}</small>
+    // 有实际公布值就换成大字显示，一眼看到「公布了多少」
+    const num = parseFloat(String(ev.value || "").replace(/[^\d.+-]/g, ""));
+    const tone = isFinite(num) ? (num > 0 ? "up" : num < 0 ? "down" : "") : "";
+    const value = ev.value
+      ? `<span class="ev-v ${tone}">${escapeHtml(String(ev.value).replace(/^同比\s*/, ""))}</span>`
+      : "";
+    out.push(`<div class="ev-label${future ? " future" : ""}${ev.value ? " has-value" : ""}" data-event-detail-index="${state.events.indexOf(ev)}" role="button" tabindex="0" style="left:${left.toFixed(1)}px;top:${top.toFixed(1)}px;width:${BOX_W}px;color:${color}">
+      <div class="ev-h" style="background:${color}30;border-left:3px solid ${color}"><b>${escapeHtml(title || "")}</b></div>
+      <small class="ev-d">${value}${escapeHtml(date || "")}${ev.label && !ev.value ? " · " + escapeHtml(ev.label) : ""}</small>
     </div>`);
   }
   return out;
@@ -1614,14 +1620,13 @@ function bindUI() {
   const mapBarBtn = $("btnEventMapBar");
   if (mapBarBtn) mapBarBtn.onclick = () => setEventMapMode(true);
 
-  // 事件分类一键全开 / 全关
-  const evAll = $("evAll"), evNone = $("evNone");
-  if (evAll) evAll.onclick = () => {
-    EVENT_CATEGORIES.forEach(([id]) => enabledEventCategories.add(id));
-    initEventFilters(); renderEvents(); loadEvents();
-  };
-  if (evNone) evNone.onclick = () => {
-    enabledEventCategories.clear();
+  // 事件分类一键开关（和「新闻标记」同一种交互）
+  const evMaster = $("evMaster");
+  if (evMaster) evMaster.onclick = () => {
+    const allOn = EVENT_CATEGORIES.every(([id]) => enabledEventCategories.has(id));
+    if (allOn) enabledEventCategories.clear();
+    else EVENT_CATEGORIES.forEach(([id]) => enabledEventCategories.add(id));
+    syncEventMaster();
     initEventFilters(); renderEvents(); loadEvents();
   };
   $("btnExitEventMap").onclick = () => setEventMapMode(false);
@@ -2106,17 +2111,26 @@ const TAG_NAME = { crypto: "加密", stock: "美股", macro: "宏观", other: "�
 
 const EVENT_CATEGORIES = [
   ["other", "其他事件", "#d5a33c"], ["liquidation", "爆仓事件", "#ff4976"],
-  ["payroll", "非农", "#4da6ff"], ["cpi", "CPI", "#c480ff"], ["ppi", "PPI", "#38c6b0"],
-  ["fed", "美联储利率", "#f0883e"], ["policy", "政策 / 宏观", "#4da6ff"],
-  ["halving", "比特币减半", "#c480ff"], ["industry", "行业", "#38c6b0"],
-  ["exchange", "交易所暴雷", "#ff4976"], ["security", "安全 / 被盗", "#ff4976"],
-  ["executive", "高管 / CEO", "#f0883e"], ["election", "选举 / 政治", "#4da6ff"],
+  ["payroll", "非农", "#4da6ff"], ["cpi", "CPI", "#ff9f45"], ["ppi", "PPI", "#38c6b0"],
+  ["fed", "美联储利率", "#c480ff"], ["policy", "政策 / 宏观", "#8b9dff"],
+  ["halving", "比特币减半", "#f0b90b"], ["industry", "行业", "#6e7681"],
+  ["exchange", "交易所暴雷", "#f85149"], ["security", "安全 / 被盗", "#ffa198"],
+  ["executive", "高管 / CEO", "#d2a8ff"], ["election", "选举 / 政治", "#3fb950"],
 ];
 // 默认不勾选「行业」：日历归档里有 260+ 条行业快讯，全开会把时间轴淹没
 const enabledEventCategories = new Set(
   EVENT_CATEGORIES.map(([id]) => id).filter(id => id !== "industry"));
 let eventMapPrevious = null;
 const mapSettings = {log:true, ma:true, future:true};
+
+/** 事件分类总开关的文案要跟着勾选状态走 */
+function syncEventMaster() {
+  const el = $("evMaster");
+  if (!el) return;
+  const on = EVENT_CATEGORIES.every(([id]) => enabledEventCategories.has(id));
+  const none = enabledEventCategories.size === 0;
+  el.textContent = on ? "事件分类：全开" : none ? "事件分类：全关" : `事件分类：${enabledEventCategories.size}/${EVENT_CATEGORIES.length}`;
+}
 
 function initEventFilters() {
   const container = $("eventFilters");
@@ -2129,13 +2143,15 @@ function initEventFilters() {
     else enabledEventCategories.delete(input.dataset.eventCategory);
     renderEvents();
     renderMapArchive();
+    syncEventMaster();
     loadEvents();
   };
+  syncEventMaster();
   for (const [id, key] of [["mapLog","log"],["mapMA","ma"],["mapFuture","future"]]) {
     $(id).onchange = e => { mapSettings[key] = e.target.checked; renderChart(); };
   }
-  $("mapSelectAll").onclick = () => { EVENT_CATEGORIES.forEach(([id]) => enabledEventCategories.add(id)); initEventFilters(); renderChart(); };
-  $("mapSelectNone").onclick = () => { enabledEventCategories.clear(); initEventFilters(); renderEvents(); };
+  $("mapSelectAll").onclick = () => { EVENT_CATEGORIES.forEach(([id]) => enabledEventCategories.add(id)); initEventFilters(); syncEventMaster(); renderChart(); };
+  $("mapSelectNone").onclick = () => { enabledEventCategories.clear(); initEventFilters(); syncEventMaster(); renderEvents(); };
   $("mapTimeframe").onchange = async e => { state.tf = e.target.value; await loadChart(false); };
   $("mapLocate").onclick = () => {
     const time = Date.parse($("mapDate").value + "T00:00:00Z") / 1000;

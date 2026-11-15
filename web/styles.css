@@ -580,6 +580,13 @@ button { font-family: inherit; }
   font-variant-numeric: tabular-nums; white-space: nowrap;
   overflow: hidden; text-overflow: ellipsis;
 }
+/* 实际公布值：加粗、用分类色，一眼看到数字 */
+.ev-v {
+  display: inline-block; margin-right: 5px; padding: 0 4px; border-radius: 2px;
+  background: rgba(255, 255, 255, .12); font-weight: 700; font-size: 11px;
+  color: #fff;
+}
+.ev-master { font-size: 10px; padding: 1px 8px; line-height: 16px; }
 
 /* 快讯标签：贴在对应 K 线上方，只显示「时间 + 短标题」 */
 .nw-label {

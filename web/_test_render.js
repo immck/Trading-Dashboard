@@ -141,7 +141,7 @@ const code = fs.readFileSync(path.join(__dirname, "app.js"), "utf8") +
   "\n;globalThis.__showBarDigest = showBarDigest; globalThis.__eventBarIndex = eventBarIndex;" +
   "\n;globalThis.__barIndexFromClick = barIndexFromClick;" +
   "\n;globalThis.__splitTimeframes = splitTimeframes; globalThis.__enabledCategories = enabledEventCategories;" +
-  "\n;globalThis.__thinByCapacity = thinByCapacity;";
+  "\n;globalThis.__thinByCapacity = thinByCapacity; globalThis.__syncEventMaster = syncEventMaster;";
 vm.runInContext(code, ctx, { filename: "app.js" });
 
 const S = ctx.__state;
@@ -602,6 +602,57 @@ const text = id => document.getElementById(id).textContent;
     if (!/202[5-9]/.test(h)) throw new Error("缺少近期年份标签");
     S.tf = "1h";
     return `CPI ${cpi.length} / 非农 ${pay.length} 条（${first} 起），图上 ${n} 个标签`;
+  });
+
+  run("事件标签显示公布数值", () => {
+    const ev = load("events");
+    const withValue = ev.events.filter(e => e.value);
+    if (withValue.length < 100) throw new Error("带数值事件太少: " + withValue.length);
+    S.tf = "1w";
+    S.chartData = load("chart_btc_1w");
+    S.events = ev.events;
+    S.eventTypes = ev.types;
+    S.eventsOn = true;
+    ctx.renderEvents();
+    const h = html("evOverlay");
+    if (h.indexOf("ev-v") < 0) throw new Error("标签里没有数值元素");
+    if (!/同比\s*[+-]?\d+\.\d%/.test(h) && !/[+-]\d+\.\d 万人/.test(h)) throw new Error("数值格式不对");
+    const n = (h.match(/class="ev-v/g) || []).length;
+    if (n < 3) throw new Error("带数值的标签过少: " + n);
+    S.tf = "1h";
+    return `${n} 个标签带数值（共 ${withValue.length} 条可用）`;
+  });
+
+  run("事件分类颜色各不相同", () => {
+    const ev = load("events");
+    const map = {};
+    for (const e of ev.events) if (!map[e.type]) map[e.type] = e.color;
+    const need = ["cpi", "payroll", "ppi", "fed"];
+    for (const t of need) if (!map[t]) throw new Error("缺少类型色: " + t);
+    const colors = need.map(t => map[t]);
+    if (new Set(colors).size !== colors.length) throw new Error("CPI/非农/PPI/美联储 颜色重复: " + colors);
+    return need.map(t => `${t}=${map[t]}`).join(" ");
+  });
+
+  run("事件分类总开关文案", () => {
+    const set = ctx.__enabledCategories;
+    const all = ["other", "liquidation", "payroll", "cpi", "ppi", "fed", "policy", "halving",
+                 "industry", "exchange", "security", "executive", "election"];
+    all.forEach(id => set.add(id));
+    ctx.__syncEventMaster();
+    const on = document.getElementById("evMaster").textContent;
+    if (!on.includes("全开")) throw new Error("全开文案不对: " + on);
+    set.clear();
+    ctx.__syncEventMaster();
+    const off = document.getElementById("evMaster").textContent;
+    if (!off.includes("全关")) throw new Error("全关文案不对: " + off);
+    set.add("cpi"); set.add("payroll");
+    ctx.__syncEventMaster();
+    const part = document.getElementById("evMaster").textContent;
+    if (!part.includes("2/13")) throw new Error("部分选中文案不对: " + part);
+    all.filter(id => id !== "industry").forEach(id => set.add(id));
+    ctx.__syncEventMaster();
+    return `${on} → ${off} → ${part}`;
   });
 
   run("事件与K线下标映射（日级/分钟级）", () => {    const times = [Date.UTC(2026, 10, 10) / 1000, Date.UTC(2026, 10, 11) / 1000, Date.UTC(2026, 10, 12) / 1000];
