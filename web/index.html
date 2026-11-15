@@ -3,7 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>多周期交易看板</title>
+<title>盘势 · 多周期技术研判</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -12,7 +13,22 @@
 
   <!-- ==================== 顶栏 ==================== -->
   <header class="topbar">
-    <div class="brand"><span class="logo-mark">TD</span>多周期看板 <span class="sub">技术分析 · 共振研判</span></div>
+    <div class="brand">
+      <svg class="logo-mark" viewBox="0 0 32 32" aria-hidden="true">
+        <defs>
+          <linearGradient id="brandGrad" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stop-color="#4da6ff"/>
+            <stop offset="1" stop-color="#a371f7"/>
+          </linearGradient>
+        </defs>
+        <rect width="32" height="32" rx="9" fill="url(#brandGrad)"/>
+        <path d="M7.5 22.5 L13.5 15.5 L18.5 19.5 L25 9" fill="none" stroke="#fff"
+              stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/>
+        <circle cx="25" cy="9" r="2.8" fill="#fff"/>
+      </svg>
+      <span class="brand-name">盘势</span>
+      <span class="sub">多周期技术研判</span>
+    </div>
     <div class="tb-group" id="marketGroup">
       <button class="tb-btn active" data-mkt="crypto">加密</button>
       <button class="tb-btn" data-mkt="us">美股</button>
@@ -39,7 +55,7 @@
     <!-- ==================== 左栏：研判 ==================== -->
     <aside class="ai-col" id="aiCol">
       <div class="ai-head">
-        <span class="ai-title">多周期研判</span>
+        <span class="ai-title">周期共振</span>
         <span class="ai-meta" id="leftMeta">--</span>
         <button class="mini section-toggle" id="btnToggleAnalysis" title="展开或收起多周期研判">展开</button>
       </div>

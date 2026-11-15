@@ -10,7 +10,7 @@ HOST = "127.0.0.1"
 #   netsh interface ipv4 show excludedportrange protocol=tcp
 # 查看。这里刻意选了 19000 以上的高位端口，避开常见的保留区间。
 PORT = 19766
-APP_NAME = "Trading Dashboard"
+APP_NAME = "盘势 PanShi"
 
 # ---------------------------------------------------------------- 网络
 # 直连失败时自动走本地代理（国内环境）。留空表示只用直连。

@@ -1546,7 +1546,7 @@ function renderToolbar() {
   const sub = SUB_TOGGLES.map(([k, label]) =>
     `<label class="ind-toggle ${state.sub === k ? "on" : ""}" data-sub="${k}">
       <input type="checkbox" ${state.sub === k ? "checked" : ""}>${label}</label>`).join("");
-  $("indToolbar").innerHTML = ov + sub;
+  $("indToolbar").innerHTML = ov + `<span class="ind-divider" title="分隔：主图叠加 与 副图指标"></span>` + sub;
 
   $("indToolbar").querySelectorAll("[data-ov]").forEach(el => {
     el.onclick = e => {
@@ -2262,9 +2262,9 @@ function renderNews(d) {
     const title = escapeHtml(it.title || "");
     return `<div class="nd-item ${it.important ? "important" : ""}" data-news-detail-index="${index}" role="button" tabindex="0" title="点击查看新闻详情">
       <span class="t">${t}</span>
-      <span class="src">${escapeHtml(it.source || "")}</span>
-      <span class="ti">${title}</span>
       <span class="tag ${tagCls}">${tagName}</span>
+      <span class="ti">${title}</span>
+      <span class="src">${escapeHtml(it.source || "")}</span>
       <button class="news-locate" data-news-index="${index}" title="定位到对应K线">定位</button>
     </div>`;
   }).join("");
