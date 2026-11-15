@@ -88,14 +88,18 @@
       <div class="chart-tools" id="chartTools" aria-label="图表工具" hidden></div>
 
       <div class="ev-bar">
+        <label class="ev-toggle" title="在K线上叠加历史事件与快讯">
+          <input type="checkbox" id="evToggle" checked> 历史事件
+        </label>
+        <div class="event-filters" id="eventFilters" aria-label="事件分类筛选"></div>
+        <span class="ev-legend" id="evLegendFallback"></span>
+        <button class="btn-ask" id="btnEventMapBar" title="进入完整的历史事件地图">事件地图</button>
         <div class="event-map-controls" id="eventMapControls" hidden>
           <div class="map-toolbar"><div><strong>BTC / USD · 历史事件地图</strong><small>按事件实际时间定位 · UTC</small></div><div class="map-options"><label><input id="mapLog" type="checkbox" checked>对数坐标</label><label><input id="mapMA" type="checkbox" checked>MA20</label><label><input id="mapFuture" type="checkbox" checked>未来节点</label><button class="btn-ask" id="mapSelectAll">全选事件</button><button class="btn-ask" id="mapSelectNone">清空事件</button></div></div>
-          <div class="event-filters" id="eventFilters" aria-label="图表事件分类"></div>
           <div class="event-map-range"><select id="mapTimeframe" aria-label="事件地图周期"><option value="1h">1H</option><option value="4h">4H</option><option value="1d">日线</option><option value="1w" selected>周线</option></select><input id="mapDate" type="date" aria-label="定位日期 UTC"><button class="btn-ask" id="mapLocate">定位日期</button><span id="eventMapRange">--</span><button class="btn-ask" id="btnMapLatest">回到最新</button><button class="btn-ask" id="btnMapFit">全历史</button><button class="btn-ask" id="btnExitEventMap">退出地图</button></div>
           <div class="event-map-legend" id="evLegend"></div>
           <details class="map-archive"><summary id="mapArchiveCount">全部时间标记</summary><div id="mapArchiveList"></div></details>
         </div>
-        <span class="ev-legend" id="evLegendFallback"></span>
       </div>
       <div class="chart-wrap">
         <div id="mainChart" class="chart-main"></div>

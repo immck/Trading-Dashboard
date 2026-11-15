@@ -137,7 +137,9 @@ const code = fs.readFileSync(path.join(__dirname, "app.js"), "utf8") +
   "\n;globalThis.__handleAiEvent = handleAiEvent; globalThis.__askAI = askAI;" +
   "\n;globalThis.__regressionChannel = regressionChannel; globalThis.__findDivergences = findDivergences;" +
   "\n;globalThis.__findTwoB = findTwoB; globalThis.__renderChartTools = renderChartTools;" +
-  "\n;globalThis.__lowerBound = lowerBound; globalThis.__renderEvents = renderEvents;";
+  "\n;globalThis.__lowerBound = lowerBound; globalThis.__renderEvents = renderEvents;" +
+  "\n;globalThis.__showBarDigest = showBarDigest; globalThis.__eventBarIndex = eventBarIndex;" +
+  "\n;globalThis.__barIndexFromClick = barIndexFromClick;";
 vm.runInContext(code, ctx, { filename: "app.js" });
 
 const S = ctx.__state;
@@ -488,20 +490,66 @@ const text = id => document.getElementById(id).textContent;
     S.newsItems = items;
     ctx.renderEvents();
     const h = html("evOverlay");
-    const n = (h.match(/nw-label/g) || []).length;
+    const n = (h.match(/nw-box/g) || []).length;
     if (n < 1) throw new Error("没有渲染快讯标签");
-    if (!/<span class="nw-t">\d{2}:\d{2}<\/span>/.test(h)) throw new Error("标签缺少时间");
-    if (!/<span class="nw-i">[^<]+<\/span>/.test(h)) throw new Error("标签缺少标题");
+    if (h.indexOf("ev-label nw-box") < 0) throw new Error("未复用事件地图的标签样式");
+    if (!/<div class="ev-h"[^>]*><b>[^<]+<\/b><\/div>/.test(h)) throw new Error("标签缺少标题栏");
+    if (!/<small class="ev-d">\d{2}:\d{2}/.test(h)) throw new Error("标签缺少时间行");
+    if ((h.match(/nw-link/g) || []).length < n) throw new Error("缺少连到K线的虚线");
     if (h.indexOf("新闻 ") >= 0) throw new Error("仍在用「新闻 N」旧样式");
-    return `${n} 条标签，形如「时:分 标题」`;
+    return `${n} 个盒子（标题栏 + 时间行 + 连接线）`;
   });
 
   run("快讯标签：关闭后消失", () => {
     S.newsMarkers = false;
     ctx.renderEvents();
-    if (html("evOverlay").indexOf("nw-label") >= 0) throw new Error("关闭后仍有快讯标签");
+    if (html("evOverlay").indexOf("nw-box") >= 0) throw new Error("关闭后仍有快讯标签");
     S.newsMarkers = true;
     return "已清空";
+  });
+
+  run("点击K线弹窗：列出该根的事件与快讯", () => {
+    // 造一根同时含事件和快讯的 K 线
+    const base = Math.floor(Date.UTC(2026, 10, 12, 4, 0) / 1000);   // 12:00 北京时间
+    const times = [base - 3600, base, base + 3600];
+    S.chartData = {
+      bars: {
+        time: times,
+        open: [100, 101, 103], high: [101, 104, 105], low: [99, 100, 102],
+        close: [101, 103, 104], volume: [1000, 1000, 1000],
+      },
+      snapshot: { close: 104 },
+    };
+    S.tf = "1h";
+    S.newsItems = [{ ts: (base + 600) * 1000, title: "测试快讯A", source: "测试源", body: "正文", tag: "crypto", url: "" }];
+    S.events = [{ time: base, date: "2026-11-12", title: "测试事件A", brief: "说明", type: "cpi", category: "cpi", color: "#c480ff", label: "CPI" }];
+    ctx.__showBarDigest(1);
+    const title = document.getElementById("toolTitle").textContent;
+    const body = html("toolBody");
+    if (title.indexOf("K线明细") < 0) throw new Error("弹窗标题不对: " + title);
+    if (body.indexOf("测试事件A") < 0) throw new Error("未列出事件");
+    if (body.indexOf("测试快讯A") < 0) throw new Error("未列出快讯");
+    if (body.indexOf("事件（1）") < 0 || body.indexOf("快讯（1）") < 0) throw new Error("分组计数不对");
+    return "事件 1 条 / 快讯 1 条";
+  });
+
+  run("点击K线弹窗：空数据也有提示", () => {
+    S.newsItems = [];
+    S.events = [];
+    ctx.__showBarDigest(0);
+    const body = html("toolBody");
+    if (body.indexOf("没有关联的历史事件") < 0) throw new Error("缺少事件空态");
+    if (body.indexOf("没有关联的快讯") < 0) throw new Error("缺少快讯空态");
+    return "两个空态都在";
+  });
+
+  run("事件与K线下标映射（日级/分钟级）", () => {
+    const times = [Date.UTC(2026, 10, 10) / 1000, Date.UTC(2026, 10, 11) / 1000, Date.UTC(2026, 10, 12) / 1000];
+    const dayEvent = { time: Date.UTC(2026, 10, 11) / 1000 };
+    const minEvent = { time: Date.UTC(2026, 10, 11, 5) / 1000 };
+    if (ctx.__eventBarIndex(times, dayEvent) !== 1) throw new Error("日级事件映射错误");
+    if (ctx.__eventBarIndex(times, minEvent) !== 1) throw new Error("分钟级事件映射错误");
+    return "日级/分钟级都落在第 2 根";
   });
 
   run("快讯分类标签齐备", () => {

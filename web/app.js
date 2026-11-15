@@ -113,7 +113,7 @@ function initCharts() {
   // 事件竖线要跟着缩放/平移实时重算
   state.mainChart.timeScale().subscribeVisibleLogicalRangeChange(() => scheduleEvents());
   state.mainChart.subscribeCrosshairMove(handleNewsHover);
-  state.mainChart.subscribeClick(handleNewsClick);
+  state.mainChart.subscribeClick(handleChartClick);
 
   const ro = new ResizeObserver(() => {
     if (state.mainChart) state.mainChart.applyOptions({ width: m.clientWidth, height: m.clientHeight });
@@ -153,6 +153,19 @@ const EMA_COLORS = ["#39d353", "#2ea043", "#238636", "#196c2e"];
 
 /* ---------------------------------------------------------------- 事件时间轴 */
 const TF_SECONDS = { "15m": 900, "30m": 1800, "1h": 3600, "4h": 14400, "1d": 86400, "1w": 604800 };
+const NEWS_COLORS = { crypto: "#c480ff", stock: "#4da6ff", macro: "#ff9500", other: "#8b949e" };
+
+/** 事件 → 对应 K 线下标。
+ *  日级事件（UTC 零点）挂到当天第一根（股票日线从开盘时刻起算也能对上）；
+ *  分钟级事件挂到「包含该时刻」的那一根。 */
+function eventBarIndex(times, ev) {
+  if (!times || !times.length || ev == null) return -1;
+  const t = Number(ev.time);
+  if (!isFinite(t)) return -1;
+  const midnight = t % 86400 === 0;
+  const i = midnight ? lowerBound(times, t) : Math.max(0, lowerBound(times, t + 1) - 1);
+  return (i >= 0 && i < times.length) ? i : -1;
+}
 
 function lowerBound(times, ts) {
   let lo = 0, hi = times.length;
@@ -178,14 +191,17 @@ async function loadEvents() {
 }
 
 function renderEventLegend() {
-  const el = $("evLegend");
-  if (!el) return;
   const used = new Set((state.events || []).map(e => e.type));
   const types = state.eventTypes || {};
-  el.innerHTML = Object.keys(types)
+  const html = Object.keys(types)
     .filter(k => used.has(k))
     .map(k => `<span><i style="background:${types[k].color}"></i>${types[k].label}</span>`)
     .join("");
+  // 地图模式用 evLegend，首页用 evLegendFallback，两边都写
+  for (const id of ["evLegend", "evLegendFallback"]) {
+    const el = $(id);
+    if (el) el.innerHTML = html;
+  }
 }
 
 let evRaf = 0;
@@ -253,7 +269,8 @@ function renderEventLines(d, ts, w, h) {
       if (x === null || x === undefined || x > w - 4) x = w - 6;
     } else {
       if (ev.time < times[0] || ev.time >= times[lastIdx] + tfSec) continue;
-      const idx = Math.max(0, lowerBound(times, ev.time + 1) - 1);
+      const idx = eventBarIndex(times, ev);
+      if (idx < 0) continue;
       try { x = ts.logicalToCoordinate(idx); } catch (e) { x = null; }
     }
     if (x === null || x === undefined || x < -40 || x > w + 40) continue;
@@ -324,17 +341,17 @@ function newsLabelGroups(times, items, tf) {
   return [...byIdx.values()];
 }
 
-/** 快讯：贴在对应 K 线上方的小标签，只显示「时间 + 短标题」 */
+/** 快讯：与历史事件地图同一套样式（标题栏 + 时间行），并用虚线连到对应 K 线 */
 function renderNewsLabels(d, ts, w, h) {
   const groups = newsLabelGroups(d.bars.time, state.newsItems, state.tf);
   if (!groups.length || !state.candleSeries || typeof state.candleSeries.priceToCoordinate !== "function") return [];
 
-  const LABEL_W = 138, LABEL_H = 16;
+  const BOX_W = 156, BOX_H = 32;
   const occ = [];
   const out = [];
   groups.sort((a, b) => (b.best.important ? 1 : 0) - (a.best.important ? 1 : 0) || (b.best.ts - a.best.ts));
 
-  for (const g of groups.slice(0, 26)) {
+  for (const g of groups.slice(0, 24)) {
     const x = ts.logicalToCoordinate(g.i);
     if (x === null || x === undefined || x < -20 || x > w + 20) continue;
     let y = null;
@@ -342,25 +359,32 @@ function renderNewsLabels(d, ts, w, h) {
     if (y === null || y === undefined || !isFinite(y)) continue;
 
     let left = x + 3;
-    if (left + LABEL_W > w) left = Math.max(0, x - LABEL_W - 3);
-    let top = y - 22;
-    for (let k = 0; k < 8; k++) {
-      const hit = occ.some(o => !(left + LABEL_W < o.x1 || left > o.x2 || top + LABEL_H < o.y1 || top > o.y2));
+    if (left + BOX_W > w) left = Math.max(0, x - BOX_W - 3);
+    let top = y - BOX_H - 8;
+    for (let k = 0; k < 6; k++) {
+      const hit = occ.some(o => !(left + BOX_W < o.x1 || left > o.x2 || top + BOX_H < o.y1 || top > o.y2));
       if (!hit) break;
-      top -= LABEL_H + 2;
+      top -= BOX_H + 4;
     }
-    if (top < 0 || top + LABEL_H > h) continue;
-    occ.push({ x1: left, x2: left + LABEL_W, y1: top, y2: top + LABEL_H });
+    if (top < 0) continue;
+    occ.push({ x1: left, x2: left + BOX_W, y1: top, y2: top + BOX_H });
 
     const t = new Date(g.best.ts).toLocaleTimeString("zh-CN", { hour12: false, hour: "2-digit", minute: "2-digit" });
-    const more = g.count > 1 ? `<i>+${g.count - 1}</i>` : "";
+    const color = NEWS_COLORS[g.best.tag] || "#8b949e";
+    const more = g.count > 1 ? ` +${g.count - 1}` : "";
     const full = g.count > 1
       ? `${t} ${g.best.title || ""}（同一K线上共 ${g.count} 条快讯）`
       : `${t} ${g.best.title || ""}`;
     const newsIndex = state.newsItems.indexOf(g.best);
-    out.push(`<div class="nw-label nw-${g.best.tag || "other"}" data-news-label-index="${newsIndex}" role="button" tabindex="0" style="left:${left.toFixed(1)}px;top:${top.toFixed(1)}px"
+    // 从标签底部连到 K 线高点，视觉上和事件竖线一致
+    const lineTop = top + BOX_H;
+    const lineH = Math.max(3, y - lineTop);
+    out.push(`<div class="nw-link" style="left:${x.toFixed(1)}px;top:${lineTop.toFixed(1)}px;height:${lineH.toFixed(1)}px;color:${color}"></div>`);
+    out.push(`<div class="ev-label nw-box" data-news-label-index="${newsIndex}" role="button" tabindex="0"
+        style="left:${left.toFixed(1)}px;top:${top.toFixed(1)}px;width:${BOX_W}px;color:${color}"
         title="点击查看新闻详情：${escapeHtml(full)}">
-      <span class="nw-t">${t}</span><span class="nw-i">${escapeHtml(truncate(g.best.title || "快讯", 13))}</span>${more}
+      <div class="ev-h" style="background:${color}22"><b>${escapeHtml(truncate(g.best.title || "快讯", 16))}</b></div>
+      <small class="ev-d">${t} · ${escapeHtml(g.best.source || "")}${more}</small>
     </div>`);
   }
   return out;
@@ -1541,6 +1565,8 @@ function bindUI() {
     renderEvents();          // 只重画覆盖层，不必重建整个图表
   };
   $("btnEventMap").onclick = () => setEventMapMode(true);
+  const mapBarBtn = $("btnEventMapBar");
+  if (mapBarBtn) mapBarBtn.onclick = () => setEventMapMode(true);
   $("btnExitEventMap").onclick = () => setEventMapMode(false);
   $("btnMapLatest").onclick = () => {
     if (!state.mainChart) return;
@@ -2198,6 +2224,81 @@ function handleNewsHover(param) {
   tip.style.left = Math.max(4, Math.min(param.point.x + 12, width - 260)) + "px";
   tip.style.top = Math.max(4, param.point.y + 12) + "px";
   tip.hidden = false;
+}
+
+/** 点击 K 线：把这一根上的历史事件与快讯一次性列出来 */
+function barIndexFromClick(param, d) {
+  if (!param || !d) return -1;
+  const times = d.bars.time;
+  if (typeof param.time === "number" && isFinite(param.time)) {
+    const i = lowerBound(times, param.time);
+    if (i < times.length && times[i] === param.time) return i;
+    return i - 1 >= 0 ? i - 1 : -1;
+  }
+  if (typeof param.logical === "number" && isFinite(param.logical)) {
+    const i = Math.round(param.logical);
+    return (i >= 0 && i < times.length) ? i : -1;
+  }
+  return -1;
+}
+
+function handleChartClick(param) {
+  if (!state.chartData) return;
+  const idx = barIndexFromClick(param, state.chartData);
+  if (idx < 0) return;
+  showBarDigest(idx);
+}
+
+function showBarDigest(idx) {
+  const d = state.chartData;
+  if (!d || idx < 0 || idx >= d.bars.time.length) return;
+  const times = d.bars.time;
+  const t = times[idx];
+  const tf = state.tf;
+
+  const news = (state.newsItems || [])
+    .filter(it => newsBarIndex(times, it.ts, tf) === idx)
+    .sort((a, b) => b.ts - a.ts);
+  const evs = (state.events || [])
+    .filter(ev => eventBarIndex(times, ev) === idx)
+    .sort((a, b) => a.time - b.time);
+
+  const when = new Date(t * 1000).toLocaleString("zh-CN", { hour12: false });
+  const o = d.bars.open[idx], hi = d.bars.high[idx], lo = d.bars.low[idx], c = d.bars.close[idx];
+  const chg = o ? (c / o - 1) * 100 : 0;
+  const head = `<div class="bd-head">
+      <span>开 ${fmt(o)} · 高 ${fmt(hi)} · 低 ${fmt(lo)} · 收 ${fmt(c)}</span>
+      <b class="${chg >= 0 ? "up" : "down"}">${chg >= 0 ? "+" : ""}${chg.toFixed(2)}%</b>
+    </div>`;
+
+  const evHtml = evs.length ? evs.map(ev => `
+      <article class="bd-item">
+        <div class="bd-t"><i style="background:${ev.color}"></i>${escapeHtml(ev.title || "")}
+          <span class="bd-tag">${escapeHtml(ev.label || "")}</span></div>
+        <div class="bd-m">${escapeHtml(ev.date || "")} · ${escapeHtml(ev.source || "")}</div>
+        ${ev.brief ? `<p>${escapeHtml(ev.brief)}</p>` : ""}
+      </article>`).join("")
+    : '<div class="bd-empty">这根 K 线没有关联的历史事件</div>';
+
+  const newsHtml = news.length ? news.map(it => {
+    let url = "";
+    try {
+      const p = new URL(it.url);
+      if (["http:", "https:"].includes(p.protocol)) url = p.href;
+    } catch (e) { /* 无有效原文地址 */ }
+    const hhmm = new Date(it.ts).toLocaleTimeString("zh-CN", { hour12: false, hour: "2-digit", minute: "2-digit" });
+    return `<article class="bd-item">
+        <div class="bd-t"><i style="background:${NEWS_COLORS[it.tag] || "#8b949e"}"></i>${escapeHtml(it.title || "快讯")}</div>
+        <div class="bd-m">${hhmm} · ${escapeHtml(it.source || "")}</div>
+        ${it.body ? `<p>${escapeHtml(truncate(it.body, 180))}</p>` : ""}
+        ${url ? `<a href="${escapeHtml(url).replace(/"/g, "&quot;")}" target="_blank" rel="noopener noreferrer">打开原文</a>` : ""}
+      </article>`;
+  }).join("")
+    : '<div class="bd-empty">这根 K 线没有关联的快讯</div>';
+
+  openTool(`K线明细 · ${when}`, `${head}
+    <h4 class="bd-h">事件（${evs.length}）</h4>${evHtml}
+    <h4 class="bd-h">快讯（${news.length}）</h4>${newsHtml}`);
 }
 
 function handleNewsClick(param) {
