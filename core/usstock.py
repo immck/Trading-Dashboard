@@ -18,15 +18,24 @@ YAHOO = "https://query1.finance.yahoo.com/v8/finance/chart"
 SINA = "https://hq.sinajs.cn/list="
 FACEBOOK_UA = C.UA
 
-# 周期 -> (Yahoo interval, range)
-# Yahoo 的分钟级历史有限：15m/30m 最多 60 天，60m 最多 730 天
+# 周期 -> (Yahoo interval, range, 合成步长秒数；0 表示直接用原始周期)
+# Yahoo 的分钟级历史有限：1m/5m 最多 7 天，15m/30m 60 天，60m 730 天
 TF_MAP = {
-    "15m": ("15m", "1mo"),
-    "30m": ("30m", "1mo"),
-    "1h": ("60m", "3mo"),
-    "4h": ("60m", "6mo"),      # 由 1h 合成
-    "1d": ("1d", "5y"),
-    "1w": ("1wk", "10y"),
+    "1m": ("1m", "5d", 0),
+    "3m": ("1m", "7d", 180),        # Yahoo 无 3m，用 1m 合成
+    "5m": ("5m", "1mo", 0),
+    "15m": ("15m", "1mo", 0),
+    "30m": ("30m", "1mo", 0),
+    "1h": ("60m", "3mo", 0),
+    "2h": ("60m", "6mo", 7200),
+    "4h": ("60m", "6mo", 14400),
+    "6h": ("60m", "1y", 21600),
+    "8h": ("60m", "1y", 28800),
+    "12h": ("60m", "730d", 43200),
+    "1d": ("1d", "5y", 0),
+    "3d": ("1d", "10y", 259200),
+    "1w": ("1wk", "10y", 0),
+    "1M": ("1mo", "max", 0),
 }
 
 _cache: dict[tuple, tuple[float, dict]] = {}
@@ -93,12 +102,12 @@ def _yahoo_bars(symbol: str, interval: str, rng: str) -> dict:
     }
 
 
-def _resample(bars: dict, factor: int) -> dict:
-    """把 1h 合成 4h：按时间戳整除分桶。"""
+def _resample(bars: dict, step_sec: int) -> dict:
+    """按固定步长分桶合成（4h/3d 等都靠它），时间戳对齐到步长整数倍。"""
     ts = bars["ts"]
     if len(ts) == 0:
         return bars
-    step = factor * 3600 * 1000
+    step = step_sec * 1000
     buckets = (ts // step)
     out_ts, o, h, l, c, v = [], [], [], [], [], []
     cur = buckets[0]
@@ -132,15 +141,15 @@ def klines(symbol: str, tf: str, force: bool = False, want: int | None = None) -
         raise ValueError(f"美股不支持周期: {tf}")
     key = (sym, tf)
     now = time.time()
-    ttl = 60 if tf in ("15m", "30m", "1h", "4h") else 300
+    ttl = 60 if C.TIMEFRAMES.get(tf, 86400) <= 14400 else 300
     hit = _cache.get(key)
     if hit and not force and now - hit[0] < ttl:
         return _slice(hit[1], want or C.BARS)
 
-    interval, rng = TF_MAP[tf]
+    interval, rng, step = TF_MAP[tf]
     bars = _yahoo_bars(sym, interval, rng)
-    if tf == "4h":
-        bars = _resample(bars, 4)
+    if step:
+        bars = _resample(bars, step)
     bars["stale"] = False
     bars["source"] = "yahoo"
     _cache[key] = (now, bars)

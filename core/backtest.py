@@ -126,7 +126,7 @@ def run(symbol: str, base_tf: str = "1h", horizon: int = 24, bars: int = 3000) -
     cover_sec = n * base_sec
 
     # 长时间窗口下 15m 历史覆盖不到，剔除，避免样本口径不一致
-    tfs_used = [tf for tf in C.TIMEFRAMES if not (bars > 2000 and tf == "15m")]
+    tfs_used = [tf for tf in C.MTF_TIMEFRAMES if not (bars > 2000 and tf == "15m")]
 
     # 各周期需要多少根：按时间跨度换算，不是一律拉满
     wants = {}

@@ -139,7 +139,8 @@ const code = fs.readFileSync(path.join(__dirname, "app.js"), "utf8") +
   "\n;globalThis.__findTwoB = findTwoB; globalThis.__renderChartTools = renderChartTools;" +
   "\n;globalThis.__lowerBound = lowerBound; globalThis.__renderEvents = renderEvents;" +
   "\n;globalThis.__showBarDigest = showBarDigest; globalThis.__eventBarIndex = eventBarIndex;" +
-  "\n;globalThis.__barIndexFromClick = barIndexFromClick;";
+  "\n;globalThis.__barIndexFromClick = barIndexFromClick;" +
+  "\n;globalThis.__splitTimeframes = splitTimeframes; globalThis.__enabledCategories = enabledEventCategories;";
 vm.runInContext(code, ctx, { filename: "app.js" });
 
 const S = ctx.__state;
@@ -543,8 +544,34 @@ const text = id => document.getElementById(id).textContent;
     return "两个空态都在";
   });
 
-  run("事件与K线下标映射（日级/分钟级）", () => {
-    const times = [Date.UTC(2026, 10, 10) / 1000, Date.UTC(2026, 10, 11) / 1000, Date.UTC(2026, 10, 12) / 1000];
+  run("周期选择：顶栏常用 6 个 + 下拉全量", () => {
+    const all = ["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "8h", "12h", "1d", "3d", "1w", "1M"];
+    const s = ctx.__splitTimeframes(all);
+    if (s.all.length !== 15) throw new Error("下拉周期数 " + s.all.length);
+    if (s.quick.length !== 6) throw new Error("顶栏按钮数 " + s.quick.length);
+    if (s.quick.join(",") !== "15m,30m,1h,4h,1d,1w") throw new Error("顶栏周期不对: " + s.quick);
+    const us = ctx.__splitTimeframes(["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "12h", "1d", "3d", "1w", "1M"]);
+    if (us.all.length !== 14 || us.quick.length !== 6) throw new Error("美股周期拆分不对");
+    return `加密 15 个 / 美股 14 个，顶栏固定 6 个`;
+  });
+
+  run("事件分类：默认排除行业，可一键全开/全关", () => {
+    const set = ctx.__enabledCategories;
+    if (set.has("industry")) throw new Error("默认不该勾选行业");
+    if (!set.has("halving") || !set.has("cpi") || !set.has("fed")) throw new Error("默认漏了重要分类");
+    const before = set.size;
+    set.add("industry");
+    if (!set.has("industry")) throw new Error("全开失败");
+    const opened = set.size;
+    set.clear();
+    if (set.size !== 0) throw new Error("全关失败");
+    // 复原，避免影响后续用例
+    ["other", "liquidation", "payroll", "cpi", "ppi", "fed", "policy", "halving",
+     "exchange", "security", "executive", "election"].forEach(id => set.add(id));
+    return `默认 ${before} 项 → 全开 ${opened} 项 → 全关 0 项`;
+  });
+
+  run("事件与K线下标映射（日级/分钟级）", () => {    const times = [Date.UTC(2026, 10, 10) / 1000, Date.UTC(2026, 10, 11) / 1000, Date.UTC(2026, 10, 12) / 1000];
     const dayEvent = { time: Date.UTC(2026, 10, 11) / 1000 };
     const minEvent = { time: Date.UTC(2026, 10, 11, 5) / 1000 };
     if (ctx.__eventBarIndex(times, dayEvent) !== 1) throw new Error("日级事件映射错误");

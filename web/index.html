@@ -19,6 +19,7 @@
     </div>
     <div class="tb-group" id="symbolGroup"></div>
     <div class="tb-group" id="tfGroup"></div>
+    <select id="tfSelect" class="tf-select" aria-label="选择K线周期" title="全部周期（1m ~ 1M）"></select>
     <div class="sym-search">
       <input id="symInput" class="sym-input" type="text" placeholder="搜代币，如 PEPE"
              autocomplete="off" spellcheck="false">
@@ -91,6 +92,8 @@
         <label class="ev-toggle" title="在K线上叠加历史事件与快讯">
           <input type="checkbox" id="evToggle" checked> 历史事件
         </label>
+        <button class="btn-ask ev-mini" id="evAll" title="勾选全部事件分类">全开</button>
+        <button class="btn-ask ev-mini" id="evNone" title="取消全部事件分类">全关</button>
         <div class="event-filters" id="eventFilters" aria-label="事件分类筛选"></div>
         <span class="ev-legend" id="evLegendFallback"></span>
         <button class="btn-ask" id="btnEventMapBar" title="进入完整的历史事件地图">事件地图</button>

@@ -152,7 +152,19 @@ const MA_COLORS = ["#f0b90b", "#4da6ff", "#c480ff", "#ff9500", "#79c0ff", "#d2a8
 const EMA_COLORS = ["#39d353", "#2ea043", "#238636", "#196c2e"];
 
 /* ---------------------------------------------------------------- 事件时间轴 */
-const TF_SECONDS = { "15m": 900, "30m": 1800, "1h": 3600, "4h": 14400, "1d": 86400, "1w": 604800 };
+const TF_SECONDS = {
+  "1m": 60, "3m": 180, "5m": 300, "15m": 900, "30m": 1800, "1h": 3600, "2h": 7200,
+  "4h": 14400, "6h": 21600, "8h": 28800, "12h": 43200, "1d": 86400, "3d": 259200,
+  "1w": 604800, "1M": 2592000,
+};
+// 顶栏只放常用的 6 个，其余走下拉
+const QUICK_TF = ["15m", "30m", "1h", "4h", "1d", "1w"];
+
+/** 把后端返回的周期表拆成「顶栏按钮」和「下拉全量」两份 */
+function splitTimeframes(all) {
+  const list = Array.isArray(all) ? all : [];
+  return { quick: list.filter(tf => QUICK_TF.includes(tf)), all: list };
+}
 const NEWS_COLORS = { crypto: "#c480ff", stock: "#4da6ff", macro: "#ff9500", other: "#8b949e" };
 
 /** 事件 → 对应 K 线下标。
@@ -1391,6 +1403,8 @@ function bindSearch() {
 /* ---------------------------------------------------------------- 交互 */
 function switchTF(tf) {
   state.tf = tf;
+  const sel = $("tfSelect");
+  if (sel && sel.value !== tf) sel.value = tf;
   document.querySelectorAll("#tfGroup .tf-btn").forEach(b => b.classList.toggle("active", b.dataset.tf === tf));
   if (state.mtf) {
     $("trendStrip").querySelectorAll(".trend-card").forEach(el =>
@@ -1460,9 +1474,19 @@ async function loadSymbols() {
       el.onclick = () => switchSymbol(el.dataset.sym);
     });
 
-    $("tfGroup").innerHTML = (d.timeframes || []).map(tf =>
+    const tfSets = splitTimeframes(d.timeframes);
+    $("tfGroup").innerHTML = tfSets.quick.map(tf =>
       `<button class="tf-btn ${tf === state.tf ? "active" : ""}" data-tf="${tf}">${tf}</button>`).join("");
     $("tfGroup").querySelectorAll(".tf-btn").forEach(el => { el.onclick = () => switchTF(el.dataset.tf); });
+
+    // 完整周期下拉（1m ~ 1M），顶栏放不下那么多按钮
+    const sel = $("tfSelect");
+    if (sel) {
+      sel.innerHTML = tfSets.all.map(tf =>
+        `<option value="${tf}" ${tf === state.tf ? "selected" : ""}>${tf}</option>`).join("");
+      sel.value = state.tf;
+      sel.onchange = () => switchTF(sel.value);
+    }
 
     // 美股搜索用股票列表；切回加密时恢复全量加密标的
     if (state.market === "us") {
@@ -1567,6 +1591,17 @@ function bindUI() {
   $("btnEventMap").onclick = () => setEventMapMode(true);
   const mapBarBtn = $("btnEventMapBar");
   if (mapBarBtn) mapBarBtn.onclick = () => setEventMapMode(true);
+
+  // 事件分类一键全开 / 全关
+  const evAll = $("evAll"), evNone = $("evNone");
+  if (evAll) evAll.onclick = () => {
+    EVENT_CATEGORIES.forEach(([id]) => enabledEventCategories.add(id));
+    initEventFilters(); renderEvents(); loadEvents();
+  };
+  if (evNone) evNone.onclick = () => {
+    enabledEventCategories.clear();
+    initEventFilters(); renderEvents(); loadEvents();
+  };
   $("btnExitEventMap").onclick = () => setEventMapMode(false);
   $("btnMapLatest").onclick = () => {
     if (!state.mainChart) return;

@@ -423,7 +423,7 @@ def _summary(sym, direction, weighted, consensus, aligned, conflict, big_score) 
 
 def mtf(symbol: str) -> dict:
     sym = feed.base_symbol(feed.norm_symbol(symbol))
-    tfs = list(C.TIMEFRAMES)
+    tfs = list(C.MTF_TIMEFRAMES)
     rows_map: dict[str, dict] = {}
 
     with ThreadPoolExecutor(max_workers=len(tfs)) as pool:
