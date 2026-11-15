@@ -11,6 +11,13 @@ from datetime import datetime, timezone
 from . import config as C
 
 FILE = os.path.join(C.DATA_DIR, "calendar_archive.json")
+BACKFILL_MARK = os.path.join(C.DATA_DIR, ".bls_backfilled")
+BACKFILL_TTL = 7 * 86400          # 归档页一周回补一次就够
+BLS_ARCHIVE_PAGES = (
+    ("cpi", "https://www.bls.gov/bls/news-release/cpi.htm", "美国 CPI 公布"),
+    ("payroll", "https://www.bls.gov/bls/news-release/empsit.htm", "美国非农就业公布"),
+    ("ppi", "https://www.bls.gov/bls/news-release/ppi.htm", "美国 PPI 公布"),
+)
 _lock = threading.Lock()
 _running = False
 _attempt = 0.0
@@ -126,6 +133,70 @@ def read() -> list[dict]:
         return []
 
 
+def parse_bls_archive(text: str, etype: str, label: str) -> list[dict]:
+    """解析 BLS 新闻稿归档页：链接里就带发布日（cpi_01152025.htm = 2025-01-15）。
+
+    使用归档页而不是 ICS，是因为 ICS 只滚动两年；归档页能一路回到 2008 年。
+    """
+    slug = {"cpi": "cpi", "payroll": "empsit", "ppi": "ppi"}[etype]
+    found: dict[str, dict] = {}
+    for match in re.finditer(r"archives/" + slug + r"_(\d{2})(\d{2})(\d{4})\.htm", text):
+        month, day, year = match.groups()
+        date = f"{year}-{month}-{day}"
+        found[f"bls-{etype}-{date}"] = {
+            "id": f"bls-{etype}-{date}",
+            "date": date,
+            "time": int(datetime.strptime(date, "%Y-%m-%d").replace(
+                tzinfo=timezone.utc).timestamp()) + 8 * 3600,
+            "title": f"{label}（{year}年{int(month)}月数据）",
+            "brief": "美国劳工统计局（BLS）官方发布日；日期取自新闻稿归档。",
+            "type": etype, "scope": "all", "source": "BLS 官方发布日程",
+            "url": "https://www.bls.gov/bls/news-release/",
+            "scheduled": False,
+            "time_precision": "day",
+        }
+    return list(found.values())
+
+
+def parse_bls_ics(text: str) -> list[dict]:
+    """解析 BLS 官方发布日历（iCalendar）。
+
+    BLS 官网直连会返回 403，这里走文本代理取官方 ICS；
+    只保留 CPI / PPI / 非农三个指标 —— 其他发布（州就业、JOLTS 等）对看盘没意义。
+    """
+    wanted = {
+        "consumer price index": ("cpi", "美国 CPI"),
+        "producer price index": ("ppi", "美国 PPI"),
+        "employment situation": ("payroll", "美国非农就业"),
+    }
+    records = []
+    for block in text.split("BEGIN:VEVENT")[1:]:
+        summary = re.search(r"^SUMMARY:(.+)$", block, re.M)
+        start = re.search(r"^DTSTART[^:]*:(\d{8})", block, re.M)
+        if not summary or not start:
+            continue
+        title = summary.group(1).strip()
+        key = title.lower()
+        if key not in wanted:
+            continue
+        etype, label = wanted[key]
+        raw = start.group(1)
+        date = f"{raw[0:4]}-{raw[4:6]}-{raw[6:8]}"
+        records.append({
+            "id": f"bls-{etype}-{date}",
+            "date": date,
+            "time": int(datetime.strptime(date, "%Y-%m-%d").replace(
+                tzinfo=timezone.utc).timestamp()) + 8 * 3600,   # 美东 08:30 ≈ UTC 13:30，取近似整点
+            "title": f"{label}发布",
+            "brief": "美国劳工统计局（BLS）官方发布日程；日期为公布日（美东时间）。",
+            "type": etype, "scope": "all", "source": "BLS 官方发布日程",
+            "url": "https://www.bls.gov/schedule/news_release/",
+            "scheduled": date > datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+            "time_precision": "day",
+        })
+    return records
+
+
 def refresh() -> None:
     global _running, _attempt, _error
     with _lock:
@@ -140,16 +211,47 @@ def refresh() -> None:
             day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
             url = f"https://www.panewslab.com/zh/calendar?mode=calendar&period=month&date={day}"
             errors = []
-            sources = (("PANews", url, parse_panews),
-                       ("FOMC", "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm", parse_fed_calendar))
-            for name, source_url, parser in sources:
+            # (名称, 地址, 解析器, 超时秒)
+            sources = (
+                ("BLS", "https://r.jina.ai/https://www.bls.gov/schedule/news_release/bls.ics",
+                 parse_bls_ics, 40),
+                ("PANews", url, parse_panews, 10),
+                ("FOMC", "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm",
+                 parse_fed_calendar, 15),
+            )
+            for name, source_url, parser, timeout in sources:
                 try:
-                    records = parser(_get(source_url, timeout=10, direct=True).decode("utf-8"))
+                    records = parser(_get(source_url, timeout=timeout, direct=True).decode("utf-8"))
                     if not records:
                         raise ValueError("no calendar records")
                     archive(records)
                 except Exception as exc:
                     errors.append(f"{name}: {exc}")
+
+            # 历史回补：BLS 归档页能提供 2008 年至今的 CPI/非农/PPI 发布日
+            stale = (not os.path.exists(BACKFILL_MARK)
+                     or time.time() - os.path.getmtime(BACKFILL_MARK) > BACKFILL_TTL)
+            if stale:
+                got = 0
+                for etype, page, label in BLS_ARCHIVE_PAGES:
+                    try:
+                        text = _get("https://r.jina.ai/" + page, timeout=50,
+                                    direct=True).decode("utf-8")
+                        records = parse_bls_archive(text, etype, label)
+                        if records:
+                            archive(records)
+                            got += len(records)
+                    except Exception as exc:
+                        errors.append(f"BLS归档{etype}: {exc}")
+                # 一条都没拿到就别写标记，下一轮继续重试
+                if got:
+                    try:
+                        os.makedirs(C.DATA_DIR, exist_ok=True)
+                        with open(BACKFILL_MARK, "w", encoding="utf-8") as fh:
+                            fh.write(datetime.now(timezone.utc).isoformat())
+                    except OSError:
+                        pass
+
             _error = "; ".join(errors)[:300]
         except Exception as exc:
             _error = str(exc)[:200]

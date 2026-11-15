@@ -67,6 +67,34 @@ class NewsCalendarTests(unittest.TestCase):
         self.assertTrue(all(row["title"] == "微软就大规模服务中断致歉" for row in rows))
         self.assertEqual(rows[-1]["original_title"], text)
 
+    def test_bls_archive_extracts_release_dates_from_links(self):
+        html = ('<a href="https://www.bls.gov/news.release/archives/cpi_01152025.htm">Jan</a>'
+                '<a href="https://www.bls.gov/news.release/archives/cpi_12112024.htm">Dec</a>'
+                '<a href="https://www.bls.gov/news.release/archives/cpi_12112024.pdf">pdf</a>')
+        rows = calendar_feed.parse_bls_archive(html, "cpi", "美国 CPI 公布")
+        self.assertEqual([r["date"] for r in rows], ["2025-01-15", "2024-12-11"])
+        self.assertTrue(all(r["type"] == "cpi" for r in rows))
+        self.assertTrue(all(r["id"].startswith("bls-cpi-") for r in rows))
+
+    def test_bls_archive_maps_employment_situation_to_payroll(self):
+        html = '<a href="https://www.bls.gov/news.release/archives/empsit_01052024.htm">NFP</a>'
+        rows = calendar_feed.parse_bls_archive(html, "payroll", "美国非农就业公布")
+        self.assertEqual(rows[0]["date"], "2024-01-05")
+        self.assertEqual(rows[0]["type"], "payroll")
+
+    def test_bls_ics_keeps_only_key_indicators(self):
+        ics = (
+            "BEGIN:VEVENT\nDTSTART;TZID=US-Eastern:20250115T083000\n"
+            "SUMMARY:Consumer Price Index\nEND:VEVENT\n"
+            "BEGIN:VEVENT\nDTSTART;TZID=US-Eastern:20250103T100000\n"
+            "SUMMARY:Metropolitan Area Employment and Unemployment (Monthly)\nEND:VEVENT\n"
+            "BEGIN:VEVENT\nDTSTART;TZID=US-Eastern:20250110T083000\n"
+            "SUMMARY:Employment Situation\nEND:VEVENT\n"
+        )
+        rows = calendar_feed.parse_bls_ics(ics)
+        self.assertEqual([r["date"] for r in rows], ["2025-01-15", "2025-01-10"])
+        self.assertEqual([r["type"] for r in rows], ["cpi", "payroll"])
+
 
 if __name__ == "__main__":
     unittest.main()

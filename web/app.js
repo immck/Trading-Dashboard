@@ -195,6 +195,7 @@ async function loadEvents() {
     renderMapArchive();
     renderEventLegend();
     scheduleEvents();
+    if (state.eventMapMode && state.chartData) updateEventMapStats(state.chartData);
   } catch (e) {
     state.events = [];
     $("evLegend").textContent = "事件加载失败";
@@ -257,6 +258,21 @@ function eventCategory(ev) {
   return ({ macro: "policy", regulation: "policy", etf: "industry", upgrade: "industry", incident: "other", peak: "other" })[type] || type;
 }
 
+/** 按可视区能放下的标签数做等距抽样，保证首尾都保留（最新的那条一定在） */
+function thinByCapacity(items, w, h, boxW, boxH, gap) {
+  if (items.length <= 1) return items;
+  const cols = Math.max(1, Math.floor(w / (boxW * 0.55)));
+  const rows = Math.max(2, Math.floor((h - 60) / (boxH + gap)));
+  const cap = Math.max(6, cols * rows);
+  if (items.length <= cap) return items;
+  const step = items.length / cap;
+  const picked = [];
+  for (let i = 0; i < cap; i++) picked.push(items[Math.min(items.length - 1, Math.round(i * step))]);
+  // 保证最后一条（最新事件）一定被选中
+  if (picked[picked.length - 1] !== items[items.length - 1]) picked[picked.length - 1] = items[items.length - 1];
+  return [...new Set(picked)];
+}
+
 /** 历史事件：竖虚线 + 顶部「标题栏 + 日期」双层标签（参考 TradingView/traderax 的画法） */
 function renderEventLines(d, ts, w, h) {
   const times = d.bars.time;
@@ -290,7 +306,13 @@ function renderEventLines(d, ts, w, h) {
   }
   items.sort((a, b) => a.x - b.x);
 
-  for (const { ev, x, future } of items) {
+  // 事件可能上千条（BLS 归档回到 2008 年），先按可视容量均匀抽样，
+  // 否则左边早期的标签会占满所有行，最近发生的事件反而被挤掉。
+  const list = thinByCapacity(items, w, h, BOX_W, BOX_H, GAP);
+  // 未来事件（预估）优先占位：它们通常在最右边，容易被历史标签抢光行
+  const order = [...list].sort((a, b) => (b.future ? 1 : 0) - (a.future ? 1 : 0) || a.x - b.x);
+
+  for (const { ev, x, future } of order) {
     const color = ev.color || "#8b949e";
     // 默认放在线右侧，靠右就翻到左侧
     let left = x + 3;

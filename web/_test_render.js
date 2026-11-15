@@ -140,7 +140,8 @@ const code = fs.readFileSync(path.join(__dirname, "app.js"), "utf8") +
   "\n;globalThis.__lowerBound = lowerBound; globalThis.__renderEvents = renderEvents;" +
   "\n;globalThis.__showBarDigest = showBarDigest; globalThis.__eventBarIndex = eventBarIndex;" +
   "\n;globalThis.__barIndexFromClick = barIndexFromClick;" +
-  "\n;globalThis.__splitTimeframes = splitTimeframes; globalThis.__enabledCategories = enabledEventCategories;";
+  "\n;globalThis.__splitTimeframes = splitTimeframes; globalThis.__enabledCategories = enabledEventCategories;" +
+  "\n;globalThis.__thinByCapacity = thinByCapacity;";
 vm.runInContext(code, ctx, { filename: "app.js" });
 
 const S = ctx.__state;
@@ -571,6 +572,38 @@ const text = id => document.getElementById(id).textContent;
     return `默认 ${before} 项 → 全开 ${opened} 项 → 全关 0 项`;
   });
 
+  run("事件过密时按容量抽样并保留最新", () => {
+    const items = Array.from({ length: 800 }, (_, i) => ({ x: i * 2, ev: { title: "t" + i } }));
+    const out = ctx.__thinByCapacity(items, 1000, 400, 170, 36, 7);
+    if (out.length >= 800) throw new Error("没有抽稀");
+    if (out[out.length - 1] !== items[799]) throw new Error("丢了最新一条");
+    if (out.length < 6) throw new Error("抽得太狠: " + out.length);
+    const xs = out.map(o => o.x);
+    if (xs.some((v, i) => i && v <= xs[i - 1])) throw new Error("结果没按时间递增");
+    return `${out.length} / 800 保留，最新一条在`;
+  });
+
+  run("事件时间轴：BLS 历史事件已覆盖", () => {
+    const ev = load("events");
+    const cpi = ev.events.filter(e => e.type === "cpi");
+    const pay = ev.events.filter(e => e.type === "payroll");
+    if (cpi.length < 100 || pay.length < 100) throw new Error(`CPI ${cpi.length} / 非农 ${pay.length} 条不足`);
+    const first = cpi[0].date.slice(0, 4);
+    if (Number(first) > 2012) throw new Error("最早 CPI 只到 " + first);
+    S.tf = "1w";
+    S.chartData = load("chart_btc_1w");
+    S.events = ev.events;
+    S.eventTypes = ev.types;
+    S.eventsOn = true;
+    ctx.renderEvents();
+    const h = html("evOverlay");
+    const n = (h.match(/ev-label/g) || []).length;
+    if (n < 3) throw new Error("标签过少 " + n);
+    if (!/202[5-9]/.test(h)) throw new Error("缺少近期年份标签");
+    S.tf = "1h";
+    return `CPI ${cpi.length} / 非农 ${pay.length} 条（${first} 起），图上 ${n} 个标签`;
+  });
+
   run("事件与K线下标映射（日级/分钟级）", () => {    const times = [Date.UTC(2026, 10, 10) / 1000, Date.UTC(2026, 10, 11) / 1000, Date.UTC(2026, 10, 12) / 1000];
     const dayEvent = { time: Date.UTC(2026, 10, 11) / 1000 };
     const minEvent = { time: Date.UTC(2026, 10, 11, 5) / 1000 };
@@ -680,7 +713,8 @@ const text = id => document.getElementById(id).textContent;
     ctx.renderEvents();
     const h = html("evOverlay");
     if (h.indexOf("ev-label future") < 0) throw new Error("未来事件未使用虚线样式");
-    if (h.indexOf("（预估）") < 0) throw new Error("未来事件未标注预估");
+    // 已排期的未来事件标「计划」，推算出来的标「预估」
+    if (!/（预估）|（计划）/.test(h)) throw new Error("未来事件未标注 预估/计划");
     const box = (h.match(/ev-label future/g) || []).length;
     S.tf = "1h";
     return box + " 个未来事件";
