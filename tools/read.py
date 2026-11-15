@@ -8,7 +8,7 @@ from __future__ import annotations
 import sys
 import urllib.request
 
-BASE = "http://127.0.0.1:9101"
+BASE = "http://127.0.0.1:19766"
 
 
 def get(path, timeout=240):

@@ -319,9 +319,9 @@ CVD 长期为负说明卖方主导，但最近 1 小时买卖几乎打平 ——
 
 ```bash
 python tools/read.py BTC          # 完整读数（本文的数据来源）
-curl "http://127.0.0.1:9101/api/mtf?symbol=BTC"      # 多周期打分
-curl "http://127.0.0.1:9101/api/snapshot?symbol=BTC" # 行情/持仓/订单流
-curl "http://127.0.0.1:9101/api/liqmap?symbol=BTC"   # 多空损分布
+curl "http://127.0.0.1:19766/api/mtf?symbol=BTC"      # 多周期打分
+curl "http://127.0.0.1:19766/api/snapshot?symbol=BTC" # 行情/持仓/订单流
+curl "http://127.0.0.1:19766/api/liqmap?symbol=BTC"   # 多空损分布
 ```
 
 把 `BTC` 换成任意 Binance 永续代码（如 `1000PEPE`、`WIF`、`ZEC`），同一套框架可直接套用。

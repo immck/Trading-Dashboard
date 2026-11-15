@@ -7,17 +7,18 @@ const C = { up: "#00b956", down: "#ff4976", accent: "#4da6ff", dim: "#8b949e",
 const TF_ORDER = ["15m", "30m", "1h", "4h", "1d", "1w"];
 
 const state = {
-  symbol: "BTC", tf: "1h", sub: "macd", wallTier: "near", venueFilter: "all", market: "crypto", newsTag: "all",
+  symbol: "BTC", tf: "1h", sub: null, wallTier: "near", venueFilter: "all", market: "crypto", newsTag: "all",
   overlays: {
-    ma: true, ema: false, boll: false, st: false, vwap: false, markers: true,
+    ma: false, ema: false, boll: false, st: false, vwap: false, markers: false,
     ichimoku: false, psar: false, keltner: false, donchian: false,
     hma: false, vwma: false, chandelier: false, pivot: false,
   },
   snap: null, mtf: null, chartData: null, liq: null, priceLines: [], wallLines: [],
   mainChart: null, subChart: null, candleSeries: null, volSeries: null,
   overlaySeries: [], subSeries: [], syncing: false, loading: 0,
-  nextFunding: 0, timers: [], gaugesHidden: false, chartMaximized: false, chartLiq: true,
-  chartTools: { walls: true, reg50: false, reg100: false, reg200: false, divergence: false, twoB: false },
+  nextFunding: 0, timers: [], analysisHidden: true, gaugesHidden: true, chartToolsHidden: true,
+  trendHidden: true, derivHidden: true, chartMaximized: false, chartLiq: false,
+  chartTools: { walls: false, reg50: false, reg100: false, reg200: false, divergence: false, twoB: false },
   newsItems: [], newsMarkers: true, selectedNews: null,
   events: [], eventTypes: {}, eventsOn: true, eventMapMode: false,
 };
@@ -161,9 +162,12 @@ function lowerBound(times, ts) {
 
 async function loadEvents() {
   try {
-    const d = await api(`/api/events?symbol=${apiSym()}`);
+    // 只请求已勾选的分类，未勾的（默认含「行业」）在服务端就过滤掉，省带宽
+    const off = EVENT_CATEGORIES.map(([id]) => id).filter(id => !enabledEventCategories.has(id));
+    const d = await api(`/api/events?symbol=${apiSym()}&exclude=${off.join(",")}`);
     state.events = d.events || [];
     state.eventTypes = d.types || {};
+    renderMapArchive();
     renderEventLegend();
     scheduleEvents();
   } catch (e) {
@@ -210,8 +214,13 @@ function renderEvents() {
 
   const ts = chart.timeScale();
   const out = [];
+  if (state.eventMapMode && mapSettings.future && d.bars.time.length) {
+    const boundary = ts.logicalToCoordinate(d.bars.time.length);
+    if (boundary !== null && boundary < w - 65) out.push(`<div class="map-future-region" style="left:${Math.max(0,boundary)}px;width:${Math.max(0,w - 65 - boundary)}px"><span>未来时间轴<br>尚无行情 · 不绘制预测 K 线</span></div>`);
+  }
   if (state.eventsOn && (state.events || []).length) out.push(...renderEventLines(d, ts, w, h));
-  if (state.newsMarkers && (state.newsItems || []).length) out.push(...renderNewsLabels(d, ts, w, h));
+  if (!state.eventMapMode && state.newsMarkers && (state.newsItems || []).length) out.push(...renderNewsLabels(d, ts, w, h));
+  if (state.eventMapMode && !enabledEventCategories.size) out.push('<div class="map-empty">未选择事件分类</div>');
   box.innerHTML = out.join("");
 }
 
@@ -226,24 +235,25 @@ function renderEventLines(d, ts, w, h) {
   if (!times.length) return [];
   const lastIdx = times.length - 1;
   const tfSec = TF_SECONDS[state.tf] || 86400;
-  const BOX_W = 170, BOX_H = 36, GAP = 4;
+  const BOX_W = Math.min(state.eventMapMode ? 225 : 170, Math.max(110, w - 90)), BOX_H = state.eventMapMode ? 34 : 36, GAP = 7;
   const placed = [];
   const out = [];
 
   const items = [];
   for (const ev of state.events) {
     if (!enabledEventCategories.has(eventCategory(ev))) continue;
-    const future = ev.time > times[lastIdx];
+    const future = ev.time > Date.now() / 1000;
+    if (state.eventMapMode && future && !mapSettings.future) continue;
     let x = null;
     if (future) {
       // 未来事件按周期推算逻辑位置；落到可视区外就贴右边并标注「预估」
       const steps = Math.ceil((ev.time - times[lastIdx]) / tfSec);
       try { x = ts.logicalToCoordinate(lastIdx + Math.min(steps, 400)); } catch (e) { x = null; }
+      if (state.eventMapMode && (x === null || x === undefined || x > w - 65)) continue;
       if (x === null || x === undefined || x > w - 4) x = w - 6;
     } else {
-      const idx = lowerBound(times, ev.time);
-      if (idx >= times.length) continue;
-      if (times[idx] - ev.time > tfSec * 3) continue;      // 早于数据起点，别硬套到第一根
+      if (ev.time < times[0] || ev.time >= times[lastIdx] + tfSec) continue;
+      const idx = Math.max(0, lowerBound(times, ev.time + 1) - 1);
       try { x = ts.logicalToCoordinate(idx); } catch (e) { x = null; }
     }
     if (x === null || x === undefined || x < -40 || x > w + 40) continue;
@@ -257,24 +267,28 @@ function renderEventLines(d, ts, w, h) {
     let left = x + 3;
     if (left + BOX_W > w - 2) left = Math.max(0, x - BOX_W - 3);
 
-    let top = 4;
-    for (let k = 0; k < 6; k++) {
+    let top = 8;
+    const maxRows = Math.max(1, Math.floor(Math.min(h * .48, 260) / (BOX_H + GAP)));
+    let available = false;
+    for (let k = 0; k < maxRows; k++) {
       const hit = placed.some(o => !(left + BOX_W < o.x1 || left > o.x2 || top + BOX_H < o.y1 || top > o.y2));
-      if (!hit) break;
+      if (!hit) { available = true; break; }
       // 先试翻到另一侧，再不行就往下换行
       const alt = left === x + 3 ? Math.max(0, x - BOX_W - 3) : x + 3;
       const altHit = alt + BOX_W <= w && !placed.some(o =>
         !(alt + BOX_W < o.x1 || alt > o.x2 || top + BOX_H < o.y1 || top > o.y2));
-      if (altHit) { left = alt; break; }
+      if (altHit) { left = alt; available = true; break; }
       top += BOX_H + GAP;
     }
-    if (top + BOX_H > h - 6) continue;
+    if (!available || top + BOX_H > h - 6) continue;
     placed.push({ x1: left, x2: left + BOX_W, y1: top, y2: top + BOX_H });
 
-    const title = future ? `${ev.title}（预估）` : ev.title;
+    const title = future ? `${ev.title}（${ev.scheduled ? "计划" : "预估"}）` : ev.title;
     const date = future ? `${ev.date} 预计` : ev.date;
     out.push(`<div class="ev-line${future ? " future" : ""}" style="left:${x.toFixed(1)}px;top:${(top + BOX_H).toFixed(1)}px;color:${color}"></div>`);
-    out.push(`<div class="ev-label${future ? " future" : ""}" style="left:${left.toFixed(1)}px;top:${top.toFixed(1)}px;width:${BOX_W}px;color:${color}">
+    const priceY = state.candleSeries.priceToCoordinate(d.bars.close[Math.max(0, Math.min(lastIdx, lowerBound(times, ev.time + 1) - 1))]);
+    if (!future && priceY !== null) out.push(`<span class="ev-price-dot" style="left:${x.toFixed(1)}px;top:${priceY.toFixed(1)}px;background:${color}"></span>`);
+    out.push(`<div class="ev-label${future ? " future" : ""}" data-event-detail-index="${state.events.indexOf(ev)}" role="button" tabindex="0" style="left:${left.toFixed(1)}px;top:${top.toFixed(1)}px;width:${BOX_W}px;color:${color}">
       <div class="ev-h" style="background:${color}22"><b>${escapeHtml(title || "")}</b></div>
       <small class="ev-d">${escapeHtml(date || "")}${ev.label ? " · " + escapeHtml(ev.label) : ""}</small>
     </div>`);
@@ -343,8 +357,9 @@ function renderNewsLabels(d, ts, w, h) {
     const full = g.count > 1
       ? `${t} ${g.best.title || ""}（同一K线上共 ${g.count} 条快讯）`
       : `${t} ${g.best.title || ""}`;
-    out.push(`<div class="nw-label nw-${g.best.tag || "other"}" style="left:${left.toFixed(1)}px;top:${top.toFixed(1)}px"
-        title="${escapeHtml(full)}">
+    const newsIndex = state.newsItems.indexOf(g.best);
+    out.push(`<div class="nw-label nw-${g.best.tag || "other"}" data-news-label-index="${newsIndex}" role="button" tabindex="0" style="left:${left.toFixed(1)}px;top:${top.toFixed(1)}px"
+        title="点击查看新闻详情：${escapeHtml(full)}">
       <span class="nw-t">${t}</span><span class="nw-i">${escapeHtml(truncate(g.best.title || "快讯", 13))}</span>${more}
     </div>`);
   }
@@ -355,9 +370,16 @@ function renderChart() {
   const d = state.chartData;
   if (!d) return;
   const t = d.bars.time;
-  state.candleSeries.setData(t.map((time, i) => ({
+  const candles = t.map((time, i) => ({
     time, open: d.bars.open[i], high: d.bars.high[i], low: d.bars.low[i], close: d.bars.close[i],
-  })));
+  }));
+  if (state.eventMapMode && mapSettings.future && t.length) {
+    const step = TF_SECONDS[state.tf] || 604800;
+    const end = Math.min(Math.max(t.at(-1), ...state.events.filter(e => e.time > t.at(-1) && enabledEventCategories.has(eventCategory(e))).map(e => e.time)), t.at(-1) + step * 400);
+    for (let time = t.at(-1) + step; time <= end + step; time += step) candles.push({time});
+  }
+  state.candleSeries.setData(candles);
+  state.mainChart.applyOptions({rightPriceScale:{mode:state.eventMapMode && mapSettings.log ? 1 : 0, scaleMargins:{top:state.eventMapMode ? .32 : .06,bottom:.16}}});
   state.volSeries.setData(t.map((time, i) => ({
     time, value: d.bars.volume[i],
     color: d.bars.close[i] >= d.bars.open[i] ? "#00b95630" : "#ff497630",
@@ -366,6 +388,7 @@ function renderChart() {
   clearOverlays();
   const ov = state.overlays;
   const legend = [];
+  if (state.eventMapMode && mapSettings.ma) addOverlay("#e2bc63", t.map((_, i) => i < 19 ? null : d.bars.close.slice(i - 19, i + 1).reduce((a,b) => a+b,0)/20));
 
   if (ov.ma) {
     Object.keys(d.ma).forEach((p, i) => {
@@ -571,8 +594,16 @@ const last = a => a && a.length ? a[a.length - 1] : null;
 function renderSub() {
   const d = state.chartData;
   if (!d) return;
+  const hidden = !state.sub;
+  $("subChart").hidden = hidden;
+  $("subLegend").hidden = hidden;
   for (const s of state.subSeries) { try { state.subChart.removeSeries(s); } catch (e) { /* ignore */ } }
   state.subSeries = [];
+  if (hidden) {
+    $("subLegend").textContent = "";
+    setTimeout(() => { if (state.mainChart) state.mainChart.applyOptions({}); }, 0);
+    return;
+  }
   const t = d.bars.time;
   const add = (color, vals, opts) => {
     const s = state.subChart.addLineSeries(Object.assign({
@@ -1454,7 +1485,7 @@ function renderToolbar() {
   $("indToolbar").querySelectorAll("[data-sub]").forEach(el => {
     el.onclick = e => {
       e.preventDefault();
-      state.sub = el.dataset.sub;
+      state.sub = state.sub === el.dataset.sub ? null : el.dataset.sub;
       renderToolbar();
       if (state.chartData) renderSub();
     };
@@ -1462,6 +1493,7 @@ function renderToolbar() {
 }
 
 function bindUI() {
+  $("aiCol").classList.toggle("collapsed", state.analysisHidden);
   renderChartTools();
   $("venueFilter").querySelectorAll("[data-market-filter]").forEach(btn => {
     btn.onclick = () => {
@@ -1520,6 +1552,31 @@ function bindUI() {
   $("newsBody").onclick = e => {
     const button = e.target.closest("[data-news-index]");
     if (button) focusNews(Number(button.dataset.newsIndex));
+    else {
+      const row = e.target.closest("[data-news-detail-index]");
+      if (row) showNewsDetail(state.newsItems[Number(row.dataset.newsDetailIndex)]);
+    }
+  };
+  $("newsBody").onkeydown = e => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    const row = e.target.closest("[data-news-detail-index]");
+    if (!row || e.target.closest("button")) return;
+    e.preventDefault(); showNewsDetail(state.newsItems[Number(row.dataset.newsDetailIndex)]);
+  };
+  $("evOverlay").onclick = e => {
+    const label = e.target.closest("[data-news-label-index]");
+    if (label) showNewsDetail(state.newsItems[Number(label.dataset.newsLabelIndex)]);
+    const event = e.target.closest("[data-event-detail-index]");
+    if (event) showEventDetail(Number(event.dataset.eventDetailIndex));
+  };
+  $("evOverlay").onkeydown = e => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    const label = e.target.closest("[data-news-label-index]");
+    const event = e.target.closest("[data-event-detail-index]");
+    if (!label && !event) return;
+    e.preventDefault();
+    if (label) showNewsDetail(state.newsItems[Number(label.dataset.newsLabelIndex)]);
+    if (event) showEventDetail(Number(event.dataset.eventDetailIndex));
   };
   $("toolClose").onclick = closeTool;
   $("toolModal").onclick = e => { if (e.target.id === "toolModal") closeTool(); };
@@ -1527,6 +1584,29 @@ function bindUI() {
     state.gaugesHidden = !state.gaugesHidden;
     $("gaugeRow").hidden = state.gaugesHidden;
     $("btnToggleGauge").textContent = state.gaugesHidden ? "展开仪表" : "收起仪表";
+  };
+  $("btnToggleAnalysis").onclick = () => {
+    state.analysisHidden = !state.analysisHidden;
+    $("aiCol").classList.toggle("collapsed", state.analysisHidden);
+    $("btnToggleAnalysis").textContent = state.analysisHidden ? "展开" : "收起";
+    $("btnToggleAnalysis").title = state.analysisHidden ? "展开多周期研判" : "收起多周期研判";
+  };
+  $("btnToggleChartTools").onclick = () => {
+    state.chartToolsHidden = !state.chartToolsHidden;
+    $("chartTools").hidden = state.chartToolsHidden;
+    $("btnToggleChartTools").textContent = state.chartToolsHidden ? "展开工具" : "收起工具";
+  };
+  $("btnToggleTrend").onclick = () => {
+    state.trendHidden = !state.trendHidden;
+    $("trendStrip").hidden = state.trendHidden;
+    $("btnToggleTrend").textContent = state.trendHidden ? "展开多周期" : "收起多周期";
+    setTimeout(() => { if (state.mainChart) state.mainChart.applyOptions({}); }, 0);
+  };
+  $("btnToggleDeriv").onclick = () => {
+    state.derivHidden = !state.derivHidden;
+    $("derivStrip").hidden = state.derivHidden;
+    $("btnToggleDeriv").textContent = state.derivHidden ? "展开持仓量" : "收起持仓量";
+    setTimeout(() => { if (state.mainChart) state.mainChart.applyOptions({}); }, 0);
   };
   $("btnResetChart").onclick = () => {
     if (state.mainChart) state.mainChart.timeScale().fitContent();
@@ -1927,10 +2007,13 @@ function handleAiEvent(obj) {
 }
 
 /* ---------------------------------------------------------------- 实时快讯 */
+let newsRetry = 0;
 async function loadNews() {
   try {
     const d = await api(`/api/news?tag=${state.newsTag}&limit=80`);
     renderNews(d);
+    if (d.warming && newsRetry < 3) { newsRetry++; setTimeout(loadNews, 4000); }
+    else if (!d.warming) newsRetry = 0;
   } catch (e) {
     $("newsBody").innerHTML = `<div class="nd-empty">快讯加载失败：${escapeHtml(e.message)}</div>`;
   }
@@ -1943,13 +2026,18 @@ const EVENT_CATEGORIES = [
   ["payroll", "非农", "#4da6ff"], ["cpi", "CPI", "#c480ff"], ["ppi", "PPI", "#38c6b0"],
   ["fed", "美联储利率", "#f0883e"], ["policy", "政策 / 宏观", "#4da6ff"],
   ["halving", "比特币减半", "#c480ff"], ["industry", "行业", "#38c6b0"],
-  ["security", "安全事件", "#ff4976"],
+  ["exchange", "交易所暴雷", "#ff4976"], ["security", "安全 / 被盗", "#ff4976"],
+  ["executive", "高管 / CEO", "#f0883e"], ["election", "选举 / 政治", "#4da6ff"],
 ];
-const enabledEventCategories = new Set(EVENT_CATEGORIES.map(([id]) => id));
+// 默认不勾选「行业」：日历归档里有 260+ 条行业快讯，全开会把时间轴淹没
+const enabledEventCategories = new Set(
+  EVENT_CATEGORIES.map(([id]) => id).filter(id => id !== "industry"));
 let eventMapPrevious = null;
+const mapSettings = {log:true, ma:true, future:true};
 
 function initEventFilters() {
   const container = $("eventFilters");
+  renderMapArchive();
   container.innerHTML = EVENT_CATEGORIES.map(([id, label, color]) => `<label title="筛选历史事件"><input type="checkbox" data-event-category="${id}" ${enabledEventCategories.has(id) ? "checked" : ""}><i style="background:${color}"></i>${label}</label>`).join("");
   container.onchange = event => {
     const input = event.target;
@@ -1957,7 +2045,30 @@ function initEventFilters() {
     if (input.checked) enabledEventCategories.add(input.dataset.eventCategory);
     else enabledEventCategories.delete(input.dataset.eventCategory);
     renderEvents();
+    renderMapArchive();
+    loadEvents();
   };
+  for (const [id, key] of [["mapLog","log"],["mapMA","ma"],["mapFuture","future"]]) {
+    $(id).onchange = e => { mapSettings[key] = e.target.checked; renderChart(); };
+  }
+  $("mapSelectAll").onclick = () => { EVENT_CATEGORIES.forEach(([id]) => enabledEventCategories.add(id)); initEventFilters(); renderChart(); };
+  $("mapSelectNone").onclick = () => { enabledEventCategories.clear(); initEventFilters(); renderEvents(); };
+  $("mapTimeframe").onchange = async e => { state.tf = e.target.value; await loadChart(false); };
+  $("mapLocate").onclick = () => {
+    const time = Date.parse($("mapDate").value + "T00:00:00Z") / 1000;
+    const times = state.chartData?.bars.time;
+    if (!Number.isFinite(time) || !times?.length) return;
+    const index = time > times.at(-1) ? times.length - 1 + (time - times.at(-1)) / (TF_SECONDS[state.tf] || 604800) : lowerBound(times,time);
+    state.mainChart.timeScale().setVisibleLogicalRange({from:index - 30,to:index + 30});
+    scheduleEvents();
+  };
+  $("mapArchiveList").onclick = e => { const row = e.target.closest("[data-archive-index]"); if (row) showEventDetail(Number(row.dataset.archiveIndex)); };
+}
+
+function renderMapArchive() {
+  const records = state.events.map((event,index) => ({event,index})).filter(({event}) => enabledEventCategories.has(eventCategory(event)));
+  $("mapArchiveCount").textContent = `全部时间标记 · ${records.length} 条`;
+  $("mapArchiveList").innerHTML = records.reverse().map(({event,index}) => `<button data-archive-index="${index}"><time>${escapeHtml(event.date || "")}</time><span>${escapeHtml(event.title)}</span><small>${escapeHtml(event.label || "")}</small></button>`).join("");
 }
 
 async function setEventMapMode(enabled) {
@@ -1967,6 +2078,7 @@ async function setEventMapMode(enabled) {
     state.market = "crypto";
     state.symbol = "BTC";
     state.tf = "1w";
+    $("mapTimeframe").value = "1w";
     $("symInput").value = "BTC";
     document.body.classList.add("event-map-mode");
     $("eventMapHead").hidden = false;
@@ -2002,9 +2114,9 @@ function updateEventMapStats(chart) {
   const earliest = chart.bars.time.length ? new Date(chart.bars.time[0] * 1000).toISOString().slice(0, 10) : "--";
   const latest = chart.bars.time.length ? new Date(chart.bars.time.at(-1) * 1000).toISOString().slice(0, 10) : "--";
   const stats = [
-    ["事件档案", `${historical.length} 条`, "当前本地事件数据"],
+    ["事件档案", `${historical.length} 条`, "历史档案 / 日历 / 已归档快讯"],
     ["最大爆仓", maxEvent ? `$${usd(maxEvent.amount_usd)}` : "暂无数据", "仅展示有金额来源的记录"],
-    ["K 线范围", `${earliest} — ${latest}`, `${chart.count || 0} 根周线`],
+    ["K 线范围", `${earliest} — ${latest}`, `${chart.count || 0} 根 K 线`],
     ["事件类型", `${new Set(historical.map(ev => ev.category || ev.type)).size} 类`, `最新事件 ${historical.at(-1)?.date || "--"}`],
   ];
   $("eventMapStats").innerHTML = stats.map(([label, value, note], i) => `<div class="event-stat"><small>${label}</small><b>${value}</b><span>${note}</span><i>${String(i + 1).padStart(2, "0")}</i></div>`).join("");
@@ -2032,13 +2144,10 @@ function renderNews(d) {
     const tagCls = `tag-${it.tag || "other"}`;
     const tagName = TAG_NAME[it.tag] || "其他";
     const title = escapeHtml(it.title || "");
-    const text = it.url
-      ? `<a href="${escapeHtml(it.url)}" target="_blank" rel="noopener">${title}</a>`
-      : title;
-    return `<div class="nd-item ${it.important ? "important" : ""}" title="${escapeHtml(it.body || it.title || "")}">
+    return `<div class="nd-item ${it.important ? "important" : ""}" data-news-detail-index="${index}" role="button" tabindex="0" title="点击查看新闻详情">
       <span class="t">${t}</span>
       <span class="src">${escapeHtml(it.source || "")}</span>
-      <span class="ti">${text}</span>
+      <span class="ti">${title}</span>
       <span class="tag ${tagCls}">${tagName}</span>
       <button class="news-locate" data-news-index="${index}" title="定位到对应K线">定位</button>
     </div>`;
@@ -2102,6 +2211,20 @@ function handleNewsClick(param) {
   }).join(""));
 }
 
+function showNewsDetail(item) {
+  if (!item) return;
+  let url = "";
+  try { const parsed = new URL(item.url); if (["http:", "https:"].includes(parsed.protocol)) url = parsed.href; } catch (e) { /* 无有效原文地址 */ }
+  const when = new Date(item.ts).toLocaleString("zh-CN", { hour12: false });
+  openTool("新闻详情", `<article class="news-detail"><h3>${escapeHtml(item.title || "快讯")}</h3><div class="news-detail-meta">${escapeHtml(item.source || "未知来源")} · ${when}</div><p>${escapeHtml(item.body || "该来源未提供正文。")}</p>${url ? `<a href="${escapeHtml(url).replace(/"/g, "&quot;")}" target="_blank" rel="noopener noreferrer">打开原始新闻</a>` : '<span class="muted">该来源未提供原文链接</span>'}</article>`);
+}
+
+function showEventDetail(index) {
+  const ev = state.events[index];
+  if (!ev) return;
+  showNewsDetail({ title: ev.title, body: `${ev.date} · ${ev.label || "事件"}${ev.scheduled ? " · 计划日程（请核对实际结果）" : ""}\n${ev.brief || ""}`, source: ev.source, url: ev.url, ts: ev.time * 1000 });
+}
+
 function focusNews(index) {
   const item = state.newsItems[index], d = state.chartData;
   if (!item || !d) return;
@@ -2124,11 +2247,19 @@ function focusNews(index) {
 function startPolling() {
   const tick = (fn, ms) => state.timers.push(setInterval(() => { if (!document.hidden) fn(); }, ms));
   tick(loadSnapshot, 10000);
-  tick(() => loadChart(true), 20000);
+  // K 线轮询按周期自适应：小周期盯得紧，大周期没必要 20 秒一次
+  const CHART_POLL = { "15m": 20000, "30m": 30000, "1h": 45000, "4h": 90000, "1d": 120000, "1w": 120000 };
+  let chartAt = 0;
+  tick(() => {
+    if (Date.now() - chartAt < (CHART_POLL[state.tf] || 45000)) return;
+    chartAt = Date.now();
+    loadChart(true);
+  }, 5000);
   tick(loadMTF, 45000);
   tick(loadLiqmap, 30000);
   tick(loadHealth, 60000);
-  tick(loadNews, 60000);
+  tick(loadNews, 30000);
+  tick(loadEvents, 300000);
   state.timers.push(setInterval(tickCountdown, 1000));
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden) { loadSnapshot(); loadMTF(); }

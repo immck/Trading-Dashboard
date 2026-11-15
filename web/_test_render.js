@@ -614,16 +614,28 @@ const text = id => document.getElementById(id).textContent;
   run("事件时间轴：日期映射到对应K线", () => {    // 2022-09-15 ETH 合并应落在 2022 年那一周的 K 线上
     const times = S.chartData.bars.time;
     const ts = Date.UTC(2022, 8, 15) / 1000;
-    const idx = ctx.__lowerBound(times, ts);
+    const idx = Math.max(0, ctx.__lowerBound(times, ts + 1) - 1);
     if (idx <= 0 || idx >= times.length) throw new Error("索引越界: " + idx);
     const d = new Date(times[idx] * 1000);
     if (d.getUTCFullYear() !== 2022) throw new Error("映射到 " + d.toISOString());
-    const gapDays = (times[idx] - ts) / 86400;
-    if (gapDays < 0 || gapDays > 7) throw new Error("与事件相差 " + gapDays.toFixed(1) + " 天");
+    const gapDays = (ts - times[idx]) / 86400;
+    if (gapDays < 0 || gapDays >= 7) throw new Error("与事件相差 " + gapDays.toFixed(1) + " 天");
     S.tf = "1h";
     return `落在 ${d.toISOString().slice(0, 10)}（相差 ${gapDays.toFixed(1)} 天）`;
   });
 
+  run("历史地图：对数、MA20、筛选与未来时间轴", () => {
+    S.eventMapMode = true;
+    vm.runInContext("renderChart()", ctx);
+    ctx.__renderEvents();
+    const labels = html("evOverlay");
+    if (!labels.includes("data-event-detail-index")) throw new Error("缺少事件详情入口");
+    vm.runInContext("enabledEventCategories.clear(); renderEvents()", ctx);
+    if (!html("evOverlay").includes("未选择事件分类")) throw new Error("缺少空筛选提示");
+    vm.runInContext("EVENT_CATEGORIES.forEach(([id]) => enabledEventCategories.add(id))", ctx);
+    S.eventMapMode = false;
+    return "地图渲染、可点击标签、空筛选状态正常";
+  });
   console.log("=".repeat(72));
   console.log(fails === 0 ? "全部通过" : `${fails} 项失败`);
   process.exit(fails === 0 ? 0 : 1);

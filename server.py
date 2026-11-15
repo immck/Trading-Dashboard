@@ -126,7 +126,8 @@ def _symbols_us():
 
 def api_events(q):
     sym = q.get("symbol", ["BTC"])[0]
-    return events.for_symbol(sym)
+    exclude = [x.strip() for x in (q.get("exclude", [""])[0] or "").split(",") if x.strip()]
+    return events.for_symbol(sym, exclude=exclude)
 
 
 def api_news(q):
@@ -515,7 +516,7 @@ def main():
         print(f"\n[启动失败] 无法绑定 {host}:{port} —— {e}")
         print("  常见原因：端口被占用，或落在 Windows/Hyper-V 的保留段里。")
         print("  查看保留段: netsh interface ipv4 show excludedportrange protocol=tcp")
-        print("  换端口: 修改 core/config.py 里的 PORT（建议 9101、9200 这类）")
+        print("  换端口: 修改 core/config.py 里的 PORT（建议 19766、9200 这类）")
         raise SystemExit(1)
 
     srv.daemon_threads = True

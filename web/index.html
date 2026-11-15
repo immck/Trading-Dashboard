@@ -36,10 +36,11 @@
   <div class="main">
 
     <!-- ==================== 左栏：研判 ==================== -->
-    <aside class="ai-col">
+    <aside class="ai-col" id="aiCol">
       <div class="ai-head">
         <span class="ai-title">多周期研判</span>
         <span class="ai-meta" id="leftMeta">--</span>
+        <button class="mini section-toggle" id="btnToggleAnalysis" title="展开或收起多周期研判">展开</button>
       </div>
 
       <div class="ai-toolbar" id="indToolbar"></div>
@@ -74,20 +75,25 @@
         <button class="btn-ask" id="btnNewsMarkers" title="在当前K线上显示快讯事件">新闻标记：开</button>
         <button class="btn-ask" id="btnEventMap" title="查看完整周线历史事件地图">历史事件地图</button>
         <span class="center-actions-spacer"></span>
-        <button class="btn-ask" id="btnToggleGauge" title="收起或展开仪表">收起仪表</button>
+        <button class="btn-ask" id="btnToggleGauge" title="展开或收起仪表">展开仪表</button>
+        <button class="btn-ask" id="btnToggleChartTools" title="展开或收起图表工具">展开工具</button>
+        <button class="btn-ask" id="btnToggleTrend" title="展开或收起多周期卡片">展开多周期</button>
+        <button class="btn-ask" id="btnToggleDeriv" title="展开或收起持仓量卡片">展开持仓量</button>
         <button class="btn-ask" id="btnResetChart" title="重置图表缩放">重置图表</button>
         <button class="btn-ask" id="btnMaxChart" title="最大化或还原K线">最大化图表</button>
       </div>
 
-      <div class="gauge-row" id="gaugeRow"></div>
+      <div class="gauge-row" id="gaugeRow" hidden></div>
 
-      <div class="chart-tools" id="chartTools" aria-label="图表工具"></div>
+      <div class="chart-tools" id="chartTools" aria-label="图表工具" hidden></div>
 
       <div class="ev-bar">
         <div class="event-map-controls" id="eventMapControls" hidden>
+          <div class="map-toolbar"><div><strong>BTC / USD · 历史事件地图</strong><small>按事件实际时间定位 · UTC</small></div><div class="map-options"><label><input id="mapLog" type="checkbox" checked>对数坐标</label><label><input id="mapMA" type="checkbox" checked>MA20</label><label><input id="mapFuture" type="checkbox" checked>未来节点</label><button class="btn-ask" id="mapSelectAll">全选事件</button><button class="btn-ask" id="mapSelectNone">清空事件</button></div></div>
           <div class="event-filters" id="eventFilters" aria-label="图表事件分类"></div>
-          <div class="event-map-range"><span id="eventMapRange">--</span><button class="btn-ask" id="btnMapLatest">回到最新</button><button class="btn-ask" id="btnMapFit">全历史</button><button class="btn-ask" id="btnExitEventMap">退出地图</button></div>
+          <div class="event-map-range"><select id="mapTimeframe" aria-label="事件地图周期"><option value="1h">1H</option><option value="4h">4H</option><option value="1d">日线</option><option value="1w" selected>周线</option></select><input id="mapDate" type="date" aria-label="定位日期 UTC"><button class="btn-ask" id="mapLocate">定位日期</button><span id="eventMapRange">--</span><button class="btn-ask" id="btnMapLatest">回到最新</button><button class="btn-ask" id="btnMapFit">全历史</button><button class="btn-ask" id="btnExitEventMap">退出地图</button></div>
           <div class="event-map-legend" id="evLegend"></div>
+          <details class="map-archive"><summary id="mapArchiveCount">全部时间标记</summary><div id="mapArchiveList"></div></details>
         </div>
         <span class="ev-legend" id="evLegendFallback"></span>
       </div>
@@ -102,8 +108,8 @@
         <div class="loading" id="chartLoading" hidden><div class="spin"></div><span>加载中…</span></div>
       </div>
 
-      <div class="trend-strip" id="trendStrip"></div>
-      <div class="deriv-strip" id="derivStrip"></div>
+      <div class="trend-strip" id="trendStrip" hidden></div>
+      <div class="deriv-strip" id="derivStrip" hidden></div>
 
     </section>
 

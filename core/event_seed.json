@@ -1,0 +1,237 @@
+{
+  "_readme": "事件时间轴数据。date 用 YYYY-MM-DD（UTC）；scope 为 BTC / ETH / all；type 决定竖线与标签颜色。可直接编辑本文件，保存后刷新页面生效。",
+  "types": {
+    "halving": {
+      "label": "减半",
+      "color": "#f0b90b"
+    },
+    "etf": {
+      "label": "ETF/上市",
+      "color": "#3fb950"
+    },
+    "upgrade": {
+      "label": "技术升级",
+      "color": "#c480ff"
+    },
+    "incident": {
+      "label": "风险事件",
+      "color": "#ff4976"
+    },
+    "macro": {
+      "label": "宏观",
+      "color": "#4da6ff"
+    },
+    "regulation": {
+      "label": "监管",
+      "color": "#ff9500"
+    },
+    "peak": {
+      "label": "极值",
+      "color": "#e6edf3"
+    },
+    "other": {
+      "label": "其它",
+      "color": "#8b949e"
+    },
+    "exchange": {
+      "label": "交易所暴雷",
+      "color": "#ff4976"
+    },
+    "security": {
+      "label": "安全 / 被盗",
+      "color": "#ff4976"
+    },
+    "executive": {
+      "label": "高管 / CEO",
+      "color": "#f0883e"
+    },
+    "election": {
+      "label": "选举 / 政治",
+      "color": "#4da6ff"
+    }
+  },
+  "events": [
+    {
+      "date": "2012-11-28",
+      "title": "BTC 第一次减半",
+      "brief": "区块奖励 50 → 25 BTC",
+      "type": "halving",
+      "scope": "BTC"
+    },
+    {
+      "date": "2014-02-28",
+      "title": "Mt. Gox 申请破产保护",
+      "brief": "大型比特币交易平台停止提现，约 85 万枚 BTC 丢失；后续追回数量与责任认定以破产程序披露为准。",
+      "type": "exchange",
+      "scope": "BTC"
+    },
+    {
+      "date": "2016-07-09",
+      "title": "BTC 第二次减半",
+      "brief": "区块奖励 25 → 12.5 BTC",
+      "type": "halving",
+      "scope": "BTC"
+    },
+    {
+      "date": "2016-08-02",
+      "title": "Bitfinex 遭黑客攻击",
+      "brief": "约 12 万枚 BTC 被盗，交易所暂停交易与提现。",
+      "type": "security",
+      "scope": "BTC"
+    },
+    {
+      "date": "2018-01-26",
+      "title": "Coincheck 加密资产被盗",
+      "brief": "约 5.23 亿枚 NEM 被盗，促使日本监管加强对交易平台的审查。",
+      "type": "security",
+      "scope": "all"
+    },
+    {
+      "date": "2019-05-07",
+      "title": "Binance 热钱包遭攻击",
+      "brief": "约 7,000 枚 BTC 被盗；交易所承担损失并暂停充值、提现。",
+      "type": "security",
+      "scope": "BTC"
+    },
+    {
+      "date": "2020-03-12",
+      "title": "黑色星期四",
+      "brief": "单日暴跌约 40%，全网爆仓历史峰值",
+      "type": "incident",
+      "scope": "all"
+    },
+    {
+      "date": "2020-05-11",
+      "title": "BTC 第三次减半",
+      "brief": "区块奖励 12.5 → 6.25 BTC",
+      "type": "halving",
+      "scope": "BTC"
+    },
+    {
+      "date": "2021-04-14",
+      "title": "Coinbase 纳斯达克上市",
+      "brief": "首家主流交易所 IPO",
+      "type": "etf",
+      "scope": "all"
+    },
+    {
+      "date": "2021-08-05",
+      "title": "ETH 伦敦升级",
+      "brief": "EIP-1559 引入基础费销毁",
+      "type": "upgrade",
+      "scope": "ETH"
+    },
+    {
+      "date": "2021-09-07",
+      "title": "萨尔瓦多比特币法币化",
+      "brief": "首个将 BTC 定为法定货币的国家",
+      "type": "regulation",
+      "scope": "BTC"
+    },
+    {
+      "date": "2021-11-10",
+      "title": "BTC 历史新高 ~69K",
+      "brief": "上一轮周期顶部",
+      "type": "peak",
+      "scope": "BTC"
+    },
+    {
+      "date": "2022-05-09",
+      "title": "LUNA / UST 崩盘",
+      "brief": "算法稳定币脱锚，市值归零",
+      "type": "incident",
+      "scope": "all"
+    },
+    {
+      "date": "2022-09-15",
+      "title": "ETH 合并 The Merge",
+      "brief": "从 PoW 转向 PoS，能耗降 99%",
+      "type": "upgrade",
+      "scope": "ETH"
+    },
+    {
+      "date": "2022-11-11",
+      "title": "FTX 申请破产",
+      "brief": "加密交易所停止提现并申请破产保护，引发行业信任危机。",
+      "type": "exchange",
+      "scope": "all"
+    },
+    {
+      "date": "2023-03-10",
+      "title": "硅谷银行倒闭",
+      "brief": "USDC 短暂脱锚，避险资金流入 BTC",
+      "type": "macro",
+      "scope": "all"
+    },
+    {
+      "date": "2023-11-02",
+      "title": "FTX 创办人 Sam Bankman-Fried 被判有罪",
+      "brief": "美国联邦陪审团裁定其多项欺诈与共谋罪名成立。",
+      "type": "executive",
+      "scope": "all"
+    },
+    {
+      "date": "2023-11-21",
+      "title": "Binance 与美国司法部达成和解，赵长鹏辞任 CEO",
+      "brief": "赵长鹏就违反美国《银行保密法》认罪并辞去 CEO；Binance 与多部门达成和解。",
+      "type": "executive",
+      "scope": "all"
+    },
+    {
+      "date": "2024-01-10",
+      "title": "BTC 现货 ETF 获批",
+      "brief": "SEC 批准 11 只现货 ETF",
+      "type": "etf",
+      "scope": "BTC"
+    },
+    {
+      "date": "2024-03-13",
+      "title": "ETH Dencun 升级",
+      "brief": "EIP-4844 引入 blob，L2 手续费大降",
+      "type": "upgrade",
+      "scope": "ETH"
+    },
+    {
+      "date": "2024-04-20",
+      "title": "BTC 第四次减半",
+      "brief": "区块奖励 6.25 → 3.125 BTC",
+      "type": "halving",
+      "scope": "BTC"
+    },
+    {
+      "date": "2024-05-23",
+      "title": "ETH 现货 ETF 获批",
+      "brief": "SEC 批准 19b-4 文件",
+      "type": "etf",
+      "scope": "ETH"
+    },
+    {
+      "date": "2024-09-18",
+      "title": "美联储降息 50bp",
+      "brief": "美联储开启降息周期。",
+      "type": "macro",
+      "scope": "all"
+    },
+    {
+      "date": "2024-11-05",
+      "title": "美国总统选举：特朗普胜选",
+      "brief": "美联社于 2024-11-06 宣布特朗普赢得选举；此处按投票日标注。",
+      "type": "election",
+      "scope": "all"
+    },
+    {
+      "date": "2025-05-07",
+      "title": "ETH Pectra 升级",
+      "brief": "账户抽象与质押上限提升",
+      "type": "upgrade",
+      "scope": "ETH"
+    },
+    {
+      "date": "2028-04-15",
+      "title": "BTC 第五次减半",
+      "brief": "区块奖励 3.125 → 1.5625 BTC（按周期推算）",
+      "type": "halving",
+      "scope": "BTC"
+    }
+  ]
+}

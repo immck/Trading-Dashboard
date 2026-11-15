@@ -5,10 +5,11 @@ import os
 
 # ---------------------------------------------------------------- 服务
 HOST = "127.0.0.1"
-# 注意：Windows 的 Hyper-V 会保留若干端口段（可用
+# 注意：Windows 的 Hyper-V 会动态保留端口段（每次重启都可能变），
+# 被保留的端口 bind 会报 WinError 10013。用
 #   netsh interface ipv4 show excludedportrange protocol=tcp
-# 查看），被保留的端口 bind 会报 WinError 10013。改端口时先确认不在保留段里。
-PORT = 9101
+# 查看。这里刻意选了 19000 以上的高位端口，避开常见的保留区间。
+PORT = 19766
 APP_NAME = "Trading Dashboard"
 
 # ---------------------------------------------------------------- 网络
