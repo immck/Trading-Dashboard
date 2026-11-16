@@ -42,6 +42,18 @@
       <div id="symDrop" class="sym-drop" hidden></div>
     </div>
     <div class="tb-ai">
+      <button class="tb-icon" id="btnTheme" title="切换白天 / 夜晚">
+        <svg class="ic-sun" viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
+          <circle cx="12" cy="12" r="4.2" fill="none" stroke="currentColor" stroke-width="1.8"/>
+          <g stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+            <path d="M12 2.6v2.3M12 19.1v2.3M2.6 12h2.3M19.1 12h2.3M5.4 5.4l1.6 1.6M17 17l1.6 1.6M18.6 5.4L17 7M7 17l-1.6 1.6"/>
+          </g>
+        </svg>
+        <svg class="ic-moon" viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
+          <path d="M20 14.5A8.2 8.2 0 1 1 9.5 4a6.6 6.6 0 0 0 10.5 10.5z"
+                fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+        </svg>
+      </button>
       <span class="pill" id="hdrTransport">通道 --</span>
       <span class="pill warn" id="hdrStale" hidden>数据快照</span>
       <button class="btn-ai" id="btnReport">生成研判</button>

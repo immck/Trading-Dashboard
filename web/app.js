@@ -70,15 +70,26 @@ function apiSym() {
 }
 
 /* ---------------------------------------------------------------- 图表 */
+function cssVar(name, fallback) {
+  try {
+    const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    return v || fallback || "";
+  } catch (e) {
+    return fallback || "";
+  }
+}
+
 function themeOpts() {
   return {
-    layout: { background: { type: "solid", color: "#0d1117" }, textColor: "#8b949e", fontSize: 11 },
-    grid: { vertLines: { color: "#161b22" }, horzLines: { color: "#161b22" } },
-    rightPriceScale: { borderColor: "#2b2f3a", scaleMargins: { top: 0.06, bottom: 0.24 } },
-    timeScale: { borderColor: "#2b2f3a", timeVisible: true, secondsVisible: false, rightOffset: 5 },
+    layout: { background: { type: "solid", color: cssVar("--chart-bg", "#0d1117") },
+              textColor: cssVar("--tx2", "#8b949e"), fontSize: 11 },
+    grid: { vertLines: { color: cssVar("--chart-grid", "#161b22") },
+            horzLines: { color: cssVar("--chart-grid", "#161b22") } },
+    rightPriceScale: { borderColor: cssVar("--line", "#2b2f3a"), scaleMargins: { top: 0.06, bottom: 0.24 } },
+    timeScale: { borderColor: cssVar("--line", "#2b2f3a"), timeVisible: true, secondsVisible: false, rightOffset: 5 },
     crosshair: { mode: LightweightCharts.CrosshairMode.Normal,
-      vertLine: { color: "#4da6ff55", style: 2, labelBackgroundColor: "#1f6feb" },
-      horzLine: { color: "#4da6ff55", style: 2, labelBackgroundColor: "#1f6feb" } },
+      vertLine: { color: cssVar("--accent", "#4da6ff") + "55", style: 2, labelBackgroundColor: cssVar("--accent", "#1f6feb") },
+      horzLine: { color: cssVar("--accent", "#4da6ff") + "55", style: 2, labelBackgroundColor: cssVar("--accent", "#1f6feb") } },
     localization: { priceFormatter: p => fmt(p) },
   };
 }
@@ -99,7 +110,7 @@ function initCharts() {
 
   state.subChart = LightweightCharts.createChart(s, Object.assign(themeOpts(), {
     width: s.clientWidth, height: s.clientHeight,
-    rightPriceScale: { borderColor: "#2b2f3a", scaleMargins: { top: 0.12, bottom: 0.12 } },
+    rightPriceScale: { borderColor: cssVar("--line", "#2b2f3a"), scaleMargins: { top: 0.12, bottom: 0.12 } },
   }));
 
   const link = (from, to) => r => {
@@ -490,7 +501,7 @@ function renderChart() {
     addOverlay("#00b95688", d.ichimoku.senkou_a, { lineWidth: 1 });
     addOverlay("#ff497688", d.ichimoku.senkou_b, { lineWidth: 1 });
   }
-  if (ov.psar && d.psar) addOverlay("#e6edf3", d.psar, { lineWidth: 1 });
+  if (ov.psar && d.psar) addOverlay(cssVar("--tx", "#e6edf3"), d.psar, { lineWidth: 1 });
   if (ov.keltner && d.keltner) {
     addOverlay(C.purple, d.keltner.mid, { lineStyle: 2 });
     addOverlay(C.purple + "77", d.keltner.upper);
@@ -843,7 +854,7 @@ function drawArc(canvas, ratio, color) {
   }
   // 指针
   const ang = a0 + span * ratio;
-  ctx.strokeStyle = "#e6edf3";
+  ctx.strokeStyle = cssVar("--tx", "#e6edf3");
   ctx.lineWidth = 1.4;
   ctx.beginPath();
   ctx.moveTo(cx, cy);
@@ -1255,8 +1266,12 @@ async function loadChart(keepView) {
 async function loadHealth() {
   try {
     const h = await api("/api/health");
-    $("hdrTransport").textContent = "通道 " + (h.transport === "direct" ? "直连" : "代理");
-    $("hdrTransport").title = `缓存 ${h.cache} 项 · 请求 ${h.requests} 次`;
+    const direct = h.transport === "direct";
+    $("hdrTransport").textContent = direct ? "直连" : "代理";
+    $("hdrTransport").title = direct
+      ? `行情直连 Binance（没有中转）\n缓存 ${h.cache} 项 · 累计请求 ${h.requests} 次`
+      : `本机直连 Binance 被阻断，行情经 127.0.0.1:7897 代理转发\n缓存 ${h.cache} 项 · 累计请求 ${h.requests} 次`;
+    $("hdrTransport").classList.toggle("warn", !direct);
   } catch (e) { /* ignore */ }
 }
 
@@ -2242,7 +2257,9 @@ const EVENT_CATEGORIES = [
   ["executive", "高管 / CEO", "#d2a8ff"], ["election", "选举 / 政治", "#3fb950"],
 ];
 // 默认不勾选「行业」：日历归档里有 260+ 条行业快讯，全开会把时间轴淹没
-const enabledEventCategories = new Set();
+// 默认勾选全部，但不含「行业」：日历归档里行业快讯太多，会淹没图表
+const enabledEventCategories = new Set(
+  EVENT_CATEGORIES.map(([id]) => id).filter(id => id !== "industry"));
 let eventMapPrevious = null;
 const mapSettings = {log:true, ma:true, future:true};
 
@@ -2545,11 +2562,66 @@ function startPolling() {
   });
 }
 
+/* ---------------------------------------------------------------- 主题 */
+const THEME_KEY = "panshi-theme";
+
+function currentTheme() {
+  const root = document && document.documentElement;
+  const t = root && root.dataset ? root.dataset.theme : "";
+  return t === "light" ? "light" : "dark";
+}
+
+function initTheme() {
+  let saved = null;
+  try { saved = localStorage.getItem(THEME_KEY); } catch (e) { /* 隐私模式 */ }
+  const prefersLight = window.matchMedia
+    && window.matchMedia("(prefers-color-scheme: light)").matches;
+  applyTheme(saved || (prefersLight ? "light" : "dark"), false);
+}
+
+function applyTheme(name, save) {
+  const root = document && document.documentElement;
+  if (root && root.dataset) root.dataset.theme = name === "light" ? "light" : "dark";
+  if (save) {
+    try { localStorage.setItem(THEME_KEY, name); } catch (e) { /* ignore */ }
+  }
+  const btn = $("btnTheme");
+  if (btn) {
+    btn.title = currentTheme() === "light" ? "切换到夜晚模式" : "切换到白天模式";
+    if (btn.setAttribute) btn.setAttribute("aria-label", btn.title);
+  }
+  applyChartTheme();
+}
+
+function toggleTheme() {
+  applyTheme(currentTheme() === "light" ? "dark" : "light", true);
+}
+
+/** 主题切换后要同步 lightweight-charts 的配色（它不吃 CSS 变量） */
+function applyChartTheme() {
+  if (!state.mainChart) return;
+  const opts = themeOpts();
+  state.mainChart.applyOptions(opts);
+  if (state.subChart) state.subChart.applyOptions(opts);
+  if (state.candleSeries) {
+    state.candleSeries.applyOptions({
+      upColor: C.up, downColor: C.down, wickUpColor: C.up, wickDownColor: C.down,
+    });
+  }
+  if (state.chartData) {
+    renderChart();
+    if (state.sub) renderSub();
+  }
+}
+
 async function boot() {
+  initTheme();
   initCharts();
   initEventFilters();
   bindUI();
   bindSearch();
+  const themeBtn = $("btnTheme");
+  if (themeBtn) themeBtn.onclick = toggleTheme;
   renderToolbar();
   $("symInput").value = state.symbol;
   await loadSymbols();
