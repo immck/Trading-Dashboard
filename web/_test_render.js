@@ -249,14 +249,23 @@ const text = id => document.getElementById(id).textContent;
     return "资金费率榜与盘口大单已渲染";
   });
 
-  run("现货筛选明确缺少数据源", () => {
+  run("现货页签显示真实现货数据", () => {
+    const snap = load("snapshot");
+    if (!(snap.spot_venues || []).length) throw new Error("fixture 缺 spot_venues");
     S.venueFilter = "spot";
-    ctx.renderVenues(load("snapshot"));
+    ctx.renderVenues(snap);
     const tb = document.getElementById("venueTable").querySelector("tbody").innerHTML;
-    if (!tb.includes("暂无现货数据源")) throw new Error("现货源缺失状态未说明");
+    const rows = (tb.match(/<tr>/g) || []).length;
+    if (rows < 1) throw new Error("现货表为空");
+    if (!tb.includes("现货")) throw new Error("未标出现货类型");
+    if (tb.includes("合约</td>")) throw new Error("现货页签里混入了合约行");
+    const legend = text("volLegend");
+    if (!legend.includes("现货")) throw new Error("量能说明没写现货: " + legend);
     S.venueFilter = "all";
-    ctx.renderVenues(load("snapshot"));
-    return "未将合约行情伪装为现货";
+    ctx.renderVenues(snap);
+    const all = document.getElementById("venueTable").querySelector("tbody").innerHTML;
+    if (!all.includes("现货") || !all.includes("合约")) throw new Error("全部页签没同时包含两种");
+    return `${rows} 所现货`;
   });
 
   run("挂单墙表", () => {

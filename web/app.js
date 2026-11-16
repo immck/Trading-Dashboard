@@ -996,27 +996,38 @@ function tickCountdown() {
 }
 
 function renderVenues(s) {
-  const all = s.venues || [];
-  const vs = state.venueFilter === "spot" ? [] : all;
+  const futures = (s.venues || []).map(v => ({ ...v, market: "futures" }));
+  const spot = (s.spot_venues || []).map(v => ({ ...v, market: "spot" }));
+  const all = futures.concat(spot);
+  const vs = state.venueFilter === "all" ? all : all.filter(v => v.market === state.venueFilter);
   const tbody = $("venueTable").querySelector("tbody");
-  const fundingRows = all.filter(v => num(v.funding) !== null)
+
+  // 资金费率只有永续合约才有
+  const fundingRows = futures.filter(v => num(v.funding) !== null)
     .map(v => ({ ...v, annual: Number(v.funding) * 3 * 365 * 100 }))
     .sort((a, b) => b.annual - a.annual);
   $("fundingPanel").innerHTML = fundingRows.length
     ? `<table class="tbl funding-table"><thead><tr><th>交易所</th><th>费率/期</th><th>年化估算</th></tr></thead><tbody>${fundingRows.map(v => `<tr><td>${v.name}</td><td class="${cls(v.funding)}">${(v.funding * 100).toFixed(4)}%</td><td class="${cls(v.annual)}">${v.annual > 0 ? "+" : ""}${v.annual.toFixed(1)}%</td></tr>`).join("")}</tbody></table>`
     : `<div class="empty compact">${state.market === "us" ? "美股无永续资金费率" : "暂无资金费率数据"}</div>`;
+
   if (!vs.length) {
-    $("volLegend").textContent = state.market === "us" ? "美股无多所聚合" : state.venueFilter === "spot" ? "现货源未接入" : "无数据";
-    $("volSummary").innerHTML = state.market === "us" ? "" : `<div class="empty compact">现货行情源未接入，当前量能仅统计合约</div>`;
-    tbody.innerHTML = `<tr><td colspan="7" class="muted">${state.market === "us" ? "美股不做多交易所量能聚合" : state.venueFilter === "spot" ? "暂无现货数据源" : "无数据"}</td></tr>`;
+    const none = state.market === "us" ? "美股不做多交易所量能聚合"
+      : state.venueFilter === "spot" ? "现货接口暂时没返回数据"
+      : state.venueFilter === "futures" ? "合约接口暂时没返回数据"
+      : "无数据";
+    $("volLegend").textContent = state.market === "us" ? "美股无多所聚合" : "无数据";
+    $("volSummary").innerHTML = state.market === "us" ? "" : `<div class="empty compact">${escapeHtml(none)}</div>`;
+    tbody.innerHTML = `<tr><td colspan="7" class="muted">${escapeHtml(none)}</td></tr>`;
     return;
   }
+
   const totalVol = vs.reduce((a, v) => a + (v.vol_usd || 0), 0);
-  $("volLegend").textContent = `${vs.length} 所合约 · ${usd(totalVol)}`;
+  const kindName = state.venueFilter === "spot" ? "现货" : state.venueFilter === "futures" ? "合约" : "合约 + 现货";
+  $("volLegend").textContent = `${vs.length} 所${kindName} · ${usd(totalVol)}`;
 
   tbody.innerHTML = vs.map(v => `<tr>
     <td>${v.name}</td>
-    <td>合约</td>
+    <td class="${v.market === "spot" ? "spot-tag" : ""}">${v.market === "spot" ? "现货" : "合约"}</td>
     <td>${fmt(v.last)}</td>
     <td class="${cls(v.change)}">${pct(v.change)}</td>
     <td>${usd(v.vol_usd)}</td>
@@ -1031,9 +1042,9 @@ function renderVenues(s) {
     return `<div class="vol-row"><label>${v.name.slice(0, 6)}</label>
       <span class="vol-bar"><i class="vb-bid" style="width:${(share * 100).toFixed(1)}%"></i></span>
       <span class="vol-num">${usd(v.vol_usd)}</span></div>`;
-  }).join("") + `<div class="vol-row"><label>盘口</label>
+  }).join("") + (state.venueFilter === "spot" ? "" : `<div class="vol-row"><label>盘口</label>
       <span class="vol-bar"><i class="vb-bid" style="width:${s.walls && s.walls.bid_total && s.walls.ask_total ? (s.walls.bid_total / (s.walls.bid_total + s.walls.ask_total) * 100).toFixed(1) : 50}%"></i><i class="vb-ask" style="flex:1"></i></span>
-      <span class="vol-num">${usd(s.walls && (s.walls.bid_total + s.walls.ask_total))}</span></div>`;
+      <span class="vol-num">${usd(s.walls && (s.walls.bid_total + s.walls.ask_total))}</span></div>`);
 }
 
 function renderWalls(s) {

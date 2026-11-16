@@ -121,6 +121,106 @@ def _gate(base: str) -> dict:
     return out
 
 
+# ---------------------------------------------------------------- 现货
+def _binance_spot(pair: str) -> dict:
+    out = {"key": "binance", "name": "Binance", "market": "spot"}
+    t = _get(f"{C.BINANCE_SPOT}/api/v3/ticker/24hr?symbol={pair}")
+    if t:
+        out.update(last=_r(t.get("lastPrice")), change=_r(t.get("priceChangePercent"), 3),
+                   high=_r(t.get("highPrice")), low=_r(t.get("lowPrice")),
+                   vol_usd=_r(t.get("quoteVolume"), 2))
+    return out
+
+
+def _okx_spot(base: str) -> dict:
+    out = {"key": "okx", "name": "OKX", "market": "spot"}
+    d = _get(f"https://www.okx.com/api/v5/market/ticker?instId={base}-USDT")
+    if d and d.get("data"):
+        r = d["data"][0]
+        last = _r(r.get("last"))
+        # 现货的 volCcy24h 已经是计价货币数量（USDT），不需要乘价格
+        out.update(last=last, high=_r(r.get("high24h")), low=_r(r.get("low24h")),
+                   vol_usd=_r(r.get("volCcy24h"), 2))
+        if r.get("open24h") and last:
+            try:
+                out["change"] = _r((last / float(r["open24h"]) - 1) * 100, 3)
+            except (TypeError, ValueError, ZeroDivisionError):
+                pass
+    return out
+
+
+def _bybit_spot(base: str) -> dict:
+    out = {"key": "bybit", "name": "Bybit", "market": "spot"}
+    d = _get(f"https://api.bybit.com/v5/market/tickers?category=spot&symbol={base}USDT")
+    if d and (d.get("result") or {}).get("list"):
+        r = d["result"]["list"][0]
+        out.update(last=_r(r.get("lastPrice")), high=_r(r.get("highPrice24h")),
+                   low=_r(r.get("lowPrice24h")), vol_usd=_r(r.get("turnover24h"), 2))
+        if r.get("price24hPcnt") is not None:
+            out["change"] = _r(_r(r.get("price24hPcnt"), 6) * 100, 3)
+    return out
+
+
+def _gate_spot(base: str) -> dict:
+    out = {"key": "gate", "name": "Gate", "market": "spot"}
+    d = _get(f"https://api.gateio.ws/api/v4/spot/tickers?currency_pair={base}_USDT")
+    if isinstance(d, list) and d:
+        r = d[0]
+        out.update(last=_r(r.get("last")), change=_r(r.get("change_percentage"), 3),
+                   high=_r(r.get("high_24h")), low=_r(r.get("low_24h")),
+                   vol_usd=_r(r.get("quote_volume"), 2))
+    return out
+
+
+def _bitget_spot(base: str) -> dict:
+    out = {"key": "bitget", "name": "Bitget", "market": "spot"}
+    d = _get(f"https://api.bitget.com/api/v2/spot/market/tickers?symbol={base}USDT")
+    if d and d.get("data"):
+        r = d["data"][0] if isinstance(d["data"], list) else d["data"]
+        out.update(last=_r(r.get("lastPr")), high=_r(r.get("high24h")), low=_r(r.get("low24h")),
+                   vol_usd=_r(r.get("quoteVolume") or r.get("usdtVolume"), 2))
+        if r.get("open"):
+            try:
+                out["change"] = _r((float(r["lastPr"]) / float(r["open"]) - 1) * 100, 3)
+            except (TypeError, ValueError, ZeroDivisionError):
+                pass
+    return out
+
+
+_spot_cache: dict[str, tuple[float, list]] = {}
+SPOT_TTL = 60          # 现货变动慢，单独缓存，避免拖慢每 15 秒一次的合约快照
+
+
+def spot_venues(base: str, force: bool = False) -> list[dict]:
+    """各交易所现货 24h 行情。和合约分开取，避免把两种口径混在同一个汇总里。"""
+    import time as _t
+    now = _t.time()
+    hit = _spot_cache.get(base)
+    if hit and not force and now - hit[0] < SPOT_TTL:
+        return hit[1]
+    jobs = {
+        "binance": lambda: _binance_spot(f"{base}{C.QUOTE}"),
+        "okx": lambda: _okx_spot(base),
+        "bybit": lambda: _bybit_spot(base),
+        "gate": lambda: _gate_spot(base),
+        "bitget": lambda: _bitget_spot(base),
+    }
+    out = []
+    with ThreadPoolExecutor(max_workers=len(jobs)) as pool:
+        futs = {k: pool.submit(f) for k, f in jobs.items()}
+        for k, f in futs.items():
+            try:
+                d = f.result()
+                if d.get("last"):
+                    out.append(d)
+            except Exception:  # noqa: BLE001
+                pass
+    out.sort(key=lambda v: -(v.get("vol_usd") or 0))
+    if out:
+        _spot_cache[base] = (now, out)
+    return out
+
+
 def venues(base: str) -> list[dict]:
     pair = f"{base}{C.QUOTE}"
     jobs = {
@@ -350,6 +450,7 @@ def _snapshot_us(sym: str) -> dict:
         "positioning": {},
         "fear_greed": {},
         "venues": [],
+        "spot_venues": [],
         "volume_summary": {"bid": 0.0, "ask": 0.0, "total": 0.0, "venue_rows": []},
         "ts": int(time.time() * 1000),
     }
@@ -369,8 +470,9 @@ def snapshot(symbol: str) -> dict:
 
     pair = f"{base}{C.QUOTE}"
     # 并行取各块
-    with ThreadPoolExecutor(max_workers=7) as pool:
+    with ThreadPoolExecutor(max_workers=8) as pool:
         f_venues = pool.submit(venues, base)
+        f_spot = pool.submit(spot_venues, base)
         f_pos = pool.submit(positioning, base)
         f_depth = pool.submit(_depth, pair)
         f_flow = pool.submit(orderflow, pair)
@@ -382,6 +484,10 @@ def snapshot(symbol: str) -> dict:
             vs = f_venues.result()
         except Exception:  # noqa: BLE001
             vs = []
+        try:
+            vs_spot = f_spot.result()
+        except Exception:  # noqa: BLE001
+            vs_spot = []
         try:
             pos = f_pos.result()
         except Exception:  # noqa: BLE001
@@ -445,6 +551,7 @@ def snapshot(symbol: str) -> dict:
             "oi_usd": v.get("oi_usd"),
             "funding": v.get("funding"),
         } for v in vs],
+        "spot_rows": vs_spot,
     }
 
     out = {
@@ -472,6 +579,7 @@ def snapshot(symbol: str) -> dict:
         "positioning": pos,
         "fear_greed": fg,
         "venues": vs,
+        "spot_venues": vs_spot,
         "volume_summary": vol_summary,
         "ts": int(now * 1000),
     }

@@ -1018,3 +1018,30 @@ button { font-family: inherit; }
 .tf-select { min-width: 54px; height: 24px; }
 .sym-input { width: 128px; }
 .sym-search .sym-input { width: 128px; }
+/* 现货行的类型标记 */
+.right .tbl td.spot-tag { color: var(--orange); }
+/* ==================================================================
+   小按钮（展开 / 收起 / 详情 / 定位）—— 之前完全没有样式，是浏览器默认灰块
+   ================================================================== */
+.mini {
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 1px 9px; min-height: 18px; border-radius: 5px; cursor: pointer;
+  border: 1px solid var(--line); background: var(--bg3); color: var(--tx2);
+  font-family: inherit; font-size: 10.5px; line-height: 16px; font-weight: 500;
+  white-space: nowrap; flex-shrink: 0;
+  transition: color .12s, border-color .12s, background .12s;
+}
+.mini:hover {
+  color: var(--accent); border-color: var(--accent); background: var(--accent-bg);
+}
+.mini:active { transform: translateY(.5px); }
+.mini:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+
+/* 面板标题里的「详情」更轻一点，避免和标题抢注意力 */
+.panel-detail {
+  color: var(--tx3); border-color: transparent; background: transparent;
+}
+.panel-detail:hover { color: var(--accent); border-color: var(--accent); background: var(--accent-bg); }
+
+/* 左栏「展开 / 收起」 */
+.section-toggle { color: var(--tx2); }
