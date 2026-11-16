@@ -363,6 +363,13 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):  # 只打错误，保持控制台干净
         pass
 
+    def handle_one_request(self):
+        # 浏览器刷新时可能在发出请求行前就断开，这里同样不该刷堆栈
+        try:
+            super().handle_one_request()
+        except (ConnectionResetError, ConnectionAbortedError, BrokenPipeError):
+            self.close_connection = True
+
     def _send(self, code: int, body: bytes, ctype: str, cache: str = "no-store",
               extra: dict | None = None):
         accepts_gzip = "gzip" in (self.headers.get("Accept-Encoding") or "")
@@ -405,7 +412,8 @@ class Handler(BaseHTTPRequestHandler):
                 data = ROUTES[path](q)
                 self._json(data)
                 dt = (time.time() - t0) * 1000
-                if dt > 500:
+                # 代理本身就带 ~900ms 延迟，阈值低于这个数只会把日志刷满
+                if dt > 2000:
                     print(f"[slow] {path}?{parsed.query} {dt:.0f} ms", flush=True)
             except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
                 self.close_connection = True
