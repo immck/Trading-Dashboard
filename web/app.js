@@ -57,11 +57,34 @@ const cls = v => v === null ? "" : v > 0 ? "up" : v < 0 ? "down" : "";
 const glyph = d => d > 0 ? "▲" : d < 0 ? "▼" : "·";
 const dirColor = d => d > 0 ? C.up : d < 0 ? C.down : C.dim;
 
+let _apiFails = 0;
+
+function setNetBanner(msg) {
+  const el = $("netBanner");
+  if (!el) return;
+  if (!msg) { el.hidden = true; return; }
+  el.textContent = msg;
+  el.hidden = false;
+}
+
 async function api(path) {
-  const r = await fetch(path, { cache: "no-store" });
-  const j = await r.json();
-  if (!r.ok || j.error) throw new Error(j.error || ("HTTP " + r.status));
-  return j;
+  try {
+    const r = await fetch(path, { cache: "no-store" });
+    const j = await r.json();
+    if (!r.ok || j.error) throw new Error(j.error || ("HTTP " + r.status));
+    if (_apiFails >= 2) setNetBanner("");
+    _apiFails = 0;
+    return j;
+  } catch (e) {
+    _apiFails += 1;
+    if (_apiFails >= 2) {
+      const hint = /通道|代理|timed out|URLError|请求失败/.test(e.message)
+        ? "行情取数失败 —— 大概率是本机代理没有可用节点（127.0.0.1:7897）。修好代理后会自动恢复。"
+        : e.message;
+      setNetBanner(hint);
+    }
+    throw e;
+  }
 }
 
 /* 美股标的一律加 US: 前缀发给后端，避免与同名加密标的混淆 */
@@ -70,13 +93,16 @@ function apiSym() {
 }
 
 /* ---------------------------------------------------------------- 图表 */
+let _cssVarCache = {};
+
 function cssVar(name, fallback) {
+  if (name in _cssVarCache) return _cssVarCache[name];
+  let value = fallback || "";
   try {
-    const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-    return v || fallback || "";
-  } catch (e) {
-    return fallback || "";
-  }
+    value = getComputedStyle(document.documentElement).getPropertyValue(name).trim() || value;
+  } catch (e) { /* 测试环境没有 getComputedStyle */ }
+  _cssVarCache[name] = value;
+  return value;
 }
 
 function themeOpts() {
@@ -455,9 +481,12 @@ function renderChart() {
   }
   state.candleSeries.setData(candles);
   state.mainChart.applyOptions({rightPriceScale:{mode:state.eventMapMode && mapSettings.log ? 1 : 0, scaleMargins:{top:state.eventMapMode ? .32 : .06,bottom:.16}}});
+  // 颜色只读一次：放进 map 里逐根取计算样式会触发成百上千次样式重算，直接卡死
+  const upFill = cssVar("--up", "#00b956") + "30";
+  const downFill = cssVar("--down", "#ff4976") + "30";
   state.volSeries.setData(t.map((time, i) => ({
     time, value: d.bars.volume[i],
-    color: (d.bars.close[i] >= d.bars.open[i] ? cssVar("--up", "#00b956") : cssVar("--down", "#ff4976")) + "30",
+    color: d.bars.close[i] >= d.bars.open[i] ? upFill : downFill,
   })));
 
   clearOverlays();
@@ -2597,6 +2626,7 @@ function initTheme() {
 }
 
 function applyTheme(name, save) {
+  _cssVarCache = {};          // 主题变了，缓存的计算样式要作废
   const theme = THEMES.includes(name) ? name : "dark";
   const root = document && document.documentElement;
   if (root && root.dataset) root.dataset.theme = theme;

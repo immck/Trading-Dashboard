@@ -100,19 +100,39 @@ def transport_name() -> str:
     return (_route() or {}).get("name", "未探测")
 
 
+_fail_count = 0
+_down_until = 0.0
+
+
+def transport_down() -> bool:
+    return time.time() < _down_until
+
+
 def get_json(url: str, retries: int = 2, timeout: float | None = None):
+    """取 JSON。连续失败后进入短暂熔断，避免代理挂掉时每个请求都干等十几秒。"""
+    global _fail_count, _down_until
+    if transport_down():
+        raise RuntimeError("数据通道不可用（代理无响应），稍后自动重试")
     timeout = timeout or C.REQUEST_TIMEOUT
     last = None
     for attempt in range(retries + 1):
         t = _route()
         try:
-            return json.loads(_fetch_raw(t["opener"], url, timeout).decode("utf-8"))
+            data = json.loads(_fetch_raw(t["opener"], url, timeout).decode("utf-8"))
+            _fail_count = 0
+            _down_until = 0.0
+            return data
         except Exception as e:  # noqa: BLE001
             last = e
             # 通道可能失效了，重置后重试一次
             if attempt == 0:
                 reset_transport()
             time.sleep(0.35 * (attempt + 1))
+    _fail_count += 1
+    if _fail_count >= 4:
+        # 连续 4 次全失败（约 6~10 秒），认为通道挂了，熔断 12 秒
+        _down_until = time.time() + 12
+        _fail_count = 0
     raise RuntimeError(f"请求失败 {url}: {last}")
 
 

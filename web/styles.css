@@ -1186,3 +1186,12 @@ button:active, .tb-btn:active, .tf-btn:active, .ptab:active, .nd-tab:active,
 
 /* 最大化图表 */
 .center { transition: background-color .18s var(--ease); }
+
+/* 通道故障提示条 */
+.net-banner {
+  padding: 6px 12px; font-size: 12px; line-height: 1.5;
+  background: var(--warn-bg); color: var(--orange);
+  border-bottom: 1px solid var(--warn-border); flex-shrink: 0;
+  animation: bannerIn .2s var(--ease);
+}
+@keyframes bannerIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
