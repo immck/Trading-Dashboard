@@ -1153,3 +1153,36 @@ button:active, .tb-btn:active, .tf-btn:active, .ptab:active, .nd-tab:active,
 .trend-strip { gap: 8px; padding: 7px 10px; }
 .trend-card { padding: 7px 10px; border-radius: 8px; }
 .trend-card .tc-tf { font-size: 12px; letter-spacing: .02em; }
+/* ==================================================================
+   过渡动画：弹窗、下拉、折叠行
+   ================================================================== */
+.modal {
+  opacity: 0;
+  transition: opacity .18s var(--ease);
+}
+.modal.in { opacity: 1; }
+.modal .modal-box {
+  opacity: 0; transform: translateY(10px) scale(.985);
+  transition: opacity .2s var(--ease), transform .24s var(--ease);
+}
+.modal.in .modal-box { opacity: 1; transform: none; }
+
+/* 搜索下拉 */
+.sym-drop {
+  opacity: 0; transform: translateY(-4px);
+  transition: opacity .14s var(--ease), transform .14s var(--ease);
+}
+.sym-drop.in { opacity: 1; transform: none; }
+
+/* 折叠行（仪表 / 图表工具 / 周期卡片 / 持仓卡片） */
+.anim-row {
+  transition: height .2s var(--ease), opacity .18s var(--ease);
+  will-change: height, opacity;
+}
+
+/* 左右栏宽度与快讯栏高度 */
+.ai-col { transition: width .22s var(--ease), min-width .22s var(--ease); }
+.news-dock { transition: height .22s var(--ease); }
+
+/* 最大化图表 */
+.center { transition: background-color .18s var(--ease); }

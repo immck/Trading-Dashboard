@@ -914,7 +914,7 @@ function renderDerivStrip(s) {
 function openTool(title, html) {
   $("toolTitle").textContent = title;
   $("toolBody").innerHTML = html;
-  $("toolModal").hidden = false;
+  showFloating($("toolModal"));
 }
 
 function openWhatIf() {
@@ -963,7 +963,7 @@ function openLiqCalc() {
   ["calcSide", "calcLev", "calcEntry", "calcMmr"].forEach(id => $(id).addEventListener("input", calc)); calc();
 }
 
-function closeTool() { $("toolModal").hidden = true; }
+function closeTool() { hideFloating($("toolModal")); }
 
 function renderQuote(s) {
   const chg = num(s.change_pct);
@@ -1462,13 +1462,13 @@ function showDrop(list, q) {
   const drop = $("symDrop");
   if (!list.length) {
     drop.innerHTML = '<div class="sym-empty">无匹配交易对</div>';
-    drop.hidden = false;
+    showFloating(drop);
     return;
   }
   drop.innerHTML = list.map((it, i) =>
     `<div class="sym-item" data-sym="${it.symbol}" data-i="${i}">
       <span>${it.symbol}</span><span class="p">${it.pair}</span></div>`).join("");
-  drop.hidden = false;
+  showFloating(drop);
   drop.querySelectorAll(".sym-item").forEach(el => {
     el.onmousedown = e => {            // 用 mousedown 抢在 blur 之前
       e.preventDefault();
@@ -1478,7 +1478,7 @@ function showDrop(list, q) {
 }
 
 function pickSymbol(sym) {
-  $("symDrop").hidden = true;
+  hideFloating($("symDrop"));
   $("symInput").value = sym;
   $("symInput").blur();
   switchSymbol(sym);
@@ -1490,14 +1490,14 @@ function bindSearch() {
   inp.addEventListener("focus", () => showDrop(filterSymbols(inp.value), inp.value));
   inp.addEventListener("keydown", e => {
     const items = $("symDrop").querySelectorAll(".sym-item");
-    if (e.key === "Escape") { $("symDrop").hidden = true; inp.blur(); return; }
+    if (e.key === "Escape") { hideFloating($("symDrop")); inp.blur(); return; }
     if (e.key === "Enter") {
       if (items.length) pickSymbol(items[0].dataset.sym);
       return;
     }
     if (e.key === "ArrowDown" && items.length) { e.preventDefault(); items[0].focus?.(); }
   });
-  inp.addEventListener("blur", () => { setTimeout(() => { $("symDrop").hidden = true; }, 150); });
+  inp.addEventListener("blur", () => { setTimeout(() => hideFloating($("symDrop")), 150); });
 }
 
 /* ---------------------------------------------------------------- 交互 */
@@ -1764,7 +1764,7 @@ function bindUI() {
     btn.classList.toggle("on", !row.hidden);
     btn.onclick = () => {
       state[key] = !state[key];
-      row.hidden = state[key];
+      animateCollapse(row, !state[key]);
       btn.classList.toggle("on", !state[key]);
       setTimeout(() => { if (state.mainChart) state.mainChart.applyOptions({}); }, 0);
     };
@@ -1839,8 +1839,8 @@ function escapeHtml(s) {
   return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-function openBacktest() { $("btModal").hidden = false; runBacktest(); }
-function closeBacktest() { $("btModal").hidden = true; }
+function openBacktest() { showFloating($("btModal")); runBacktest(); }
+function closeBacktest() { hideFloating($("btModal")); }
 
 async function runBacktest() {
   const box = $("btBody");
@@ -1907,7 +1907,7 @@ function renderBacktest(d) {
 let reportData = null;
 
 async function openReport() {
-  $("rpModal").hidden = false;
+  showFloating($("rpModal"));
   $("rpBody").innerHTML = '<div class="empty">正在汇总多周期数据，约 3~10 秒…</div>';
   $("rpMeta").textContent = "";
   loadAiStatus();
@@ -1920,7 +1920,7 @@ async function openReport() {
   }
 }
 
-function closeReport() { $("rpModal").hidden = true; }
+function closeReport() { hideFloating($("rpModal")); }
 
 function renderReport(d) {
   const t = new Date(d.ts);
@@ -2628,6 +2628,66 @@ function applyChartTheme() {
   if (state.chartData) {
     renderChart();
     if (state.sub) renderSub();
+  }
+}
+
+/* ---------------------------------------------------------------- 过渡动画 */
+const EASE_MS = 220;
+
+/** 弹窗 / 下拉：先显示再上浮，避免 display:none 导致过渡直接跳变 */
+function showFloating(el) {
+  if (!el) return;
+  if (el.hidden) {
+    el.hidden = false;
+    void el.offsetWidth;          // 强制回流，过渡才会播放
+  }
+  el.classList.add("in");
+}
+
+function hideFloating(el) {
+  if (!el || el.hidden) return;
+  el.classList.remove("in");
+  const finish = () => {
+    el.removeEventListener("transitionend", finish);
+    if (!el.classList.contains("in")) el.hidden = true;   // 期间又被打开就别收
+  };
+  el.addEventListener("transitionend", finish, { once: true });
+  setTimeout(finish, EASE_MS + 80);   // 兜底：过渡被浏览器跳过时也能收起
+}
+
+/** 高度过渡的展开 / 收起，用于仪表、图表工具、周期与持仓卡片 */
+function animateCollapse(row, show) {
+  if (!row) return;
+  if (!row.classList.contains("anim-row")) row.classList.add("anim-row");
+  row.style.overflow = "hidden";
+  if (show) {
+    row.hidden = false;
+    const target = row.scrollHeight;
+    row.style.height = "0px";
+    row.style.opacity = "0";
+    requestAnimationFrame(() => {
+      row.style.height = target + "px";
+      row.style.opacity = "1";
+    });
+    setTimeout(() => {
+      row.style.height = "";
+      row.style.opacity = "";
+      row.style.overflow = "";
+    }, EASE_MS + 60);
+  } else {
+    const h = row.scrollHeight;
+    row.style.height = h + "px";
+    row.style.opacity = "1";
+    requestAnimationFrame(() => {
+      row.style.height = "0px";
+      row.style.opacity = "0";
+    });
+    setTimeout(() => {
+      row.hidden = true;
+      row.style.height = "";
+      row.style.opacity = "";
+      row.style.overflow = "";
+    }, EASE_MS + 40);
   }
 }
 
