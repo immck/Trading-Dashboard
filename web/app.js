@@ -1265,9 +1265,15 @@ async function loadSnapshot() {
   try {
     const s = await api(`/api/snapshot?symbol=${apiSym()}`);
     renderSnapshot(s);
+    // 通道断掉时后端会用最后一次成功的数据顶住，这里明确标出延迟
+    if (s.stale) {
+      setNetBanner(`网络中断 · 行情延迟 ${s.stale_age_s || 0} 秒，当前显示最后一次成功的数据`);
+    } else {
+      setNetBanner("");
+    }
   } catch (e) {
     console.error(e);
-    $("flowStats").innerHTML = `<div class="empty">快照失败: ${e.message}</div>`;
+    $("flowStats").innerHTML = `<div class="empty">快照失败: ${escapeHtml(e.message)}</div>`;
   }
 }
 

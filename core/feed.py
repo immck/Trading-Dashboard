@@ -74,9 +74,18 @@ def _route():
         return _transport
 
 
+_last_reset = 0.0
+
+
 def reset_transport():
-    global _transport
+    """重置通道。每秒最多重探一次 —— 断网时多个并发请求会同时失败，
+    每个都触发一次探测的话，一次快照要多等十几秒。"""
+    global _transport, _last_reset
+    now = time.time()
     with _transport_lock:
+        if now - _last_reset < 1.0:
+            return
+        _last_reset = now
         _transport = None
 
 
@@ -129,9 +138,9 @@ def get_json(url: str, retries: int = 2, timeout: float | None = None):
                 reset_transport()
             time.sleep(0.35 * (attempt + 1))
     _fail_count += 1
-    if _fail_count >= 4:
-        # 连续 4 次全失败（约 6~10 秒），认为通道挂了，熔断 12 秒
-        _down_until = time.time() + 12
+    if _fail_count >= 2:
+        # 连续 2 次全失败就熔断 30 秒：断网时页面秒回错误，网络恢复后最多 30 秒自动接上
+        _down_until = time.time() + 30
         _fail_count = 0
     raise RuntimeError(f"请求失败 {url}: {last}")
 

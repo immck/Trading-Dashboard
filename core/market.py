@@ -37,7 +37,7 @@ def _r(x, nd=8):
 
 def _get(url, timeout=6):
     try:
-        return feed.get_json(url, retries=1, timeout=timeout)
+        return feed.get_json(url, retries=0, timeout=timeout)   # 断网时快失败，别每个调用重试两次
     except Exception:  # noqa: BLE001
         return None
 
@@ -457,7 +457,11 @@ def _snapshot_us(sym: str) -> dict:
 
 
 # ---------------------------------------------------------------- 汇总
+_down_until = 0.0
+
+
 def snapshot(symbol: str) -> dict:
+    global _down_until
     if feed.market_of(symbol) == "us":
         return _snapshot_us(feed.strip_us(symbol))
     base = feed.base_symbol(feed.norm_symbol(symbol))
@@ -467,6 +471,14 @@ def snapshot(symbol: str) -> dict:
     hit = _cache.get(key)
     if hit and now - hit[0] < TTL:
         return hit[1]
+    # 刚失败过：直接给旧数据或报错，别再把整轮请求跑一遍
+    if now < _down_until:
+        if hit:
+            stale = dict(hit[1])
+            stale["stale"] = True
+            stale["stale_age_s"] = int(now - hit[0])
+            return stale
+        raise RuntimeError("行情通道不可用（网络中断），稍后自动重试")
 
     pair = f"{base}{C.QUOTE}"
     # 并行取各块
@@ -516,6 +528,14 @@ def snapshot(symbol: str) -> dict:
     bnc = next((v for v in vs if v["key"] == "binance"), {})
     price = bnc.get("last") or (float(kl[-1][4]) if kl else None)
     if not price:
+        _down_until = time.time() + 30
+        # 通道断了：用最后一次成功的数据顶着，把延迟时间告诉前端
+        cached = _cache.get(key)
+        if cached:
+            stale = dict(cached[1])
+            stale["stale"] = True
+            stale["stale_age_s"] = int(now - cached[0])
+            return stale
         raise RuntimeError("拿不到价格")
 
     best_bid = depth["bids"][0][0] if depth["bids"] else None
@@ -580,6 +600,7 @@ def snapshot(symbol: str) -> dict:
         "fear_greed": fg,
         "venues": vs,
         "spot_venues": vs_spot,
+        "stale": False,
         "volume_summary": vol_summary,
         "ts": int(now * 1000),
     }

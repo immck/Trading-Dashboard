@@ -7,6 +7,8 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 
+import time
+
 import numpy as np
 
 from . import config as C
@@ -421,6 +423,9 @@ def _summary(sym, direction, weighted, consensus, aligned, conflict, big_score) 
     return "；".join(parts) + "。"
 
 
+_mtf_last: dict[str, tuple[float, dict]] = {}
+
+
 def mtf(symbol: str) -> dict:
     sym = feed.base_symbol(feed.norm_symbol(symbol))
     tfs = list(C.MTF_TIMEFRAMES)
@@ -436,6 +441,14 @@ def mtf(symbol: str) -> dict:
                 rows_map[tf] = {"symbol": sym, "tf": tf, "error": str(e), "score": 0,
                                 "verdict": "neutral", "verdict_label": "无数据", "signals": []}
     rows = [rows_map[tf] for tf in tfs]
+    # 全部周期都失败 = 通道断了：拿上一次成功的结果顶住，并标记延迟
+    if not any("error" not in r for r in rows):
+        prev = _mtf_last.get(sym)
+        if prev:
+            stale = dict(prev[1])
+            stale["stale"] = True
+            stale["stale_age_s"] = int(time.time() - prev[0])
+            return stale
 
     ok = [r for r in rows if "error" not in r]
     total_w = sum(C.TF_WEIGHT[r["tf"]] for r in ok) or 1.0
@@ -463,7 +476,7 @@ def mtf(symbol: str) -> dict:
 
     big_ok = (big_score > 8 and direction > 0) or (big_score < -8 and direction < 0)
 
-    return {
+    result = {
         "symbol": sym,
         "price": ok[-1]["price"] if ok else None,
         "rows": rows,
@@ -478,4 +491,7 @@ def mtf(symbol: str) -> dict:
         "alignment_ratio": round(len(aligned) / len(ok), 2) if ok else 0,
         "big_tf_agree": bool(big_ok),
         "summary": _summary(sym, direction, weighted, consensus, aligned, conflict, big_score),
+        "stale": False,
     }
+    _mtf_last[sym] = (time.time(), result)
+    return result
