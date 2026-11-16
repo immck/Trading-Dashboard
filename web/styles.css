@@ -41,42 +41,80 @@
   --chart-grid: #161b22;
 }
 
-/* 浅色 */
-[data-theme="light"] {
-  --bg: #f4f6f9;
-  --bg2: #ffffff;
-  --bg3: #eef1f6;
-  --line: #d5dce5;
-  --line-2: #c3ccd8;
-  --panel: #ffffff;
+/* 暗灰（中间档：比夜晚亮一档，比白天暗很多，长时间看不刺眼） */
+[data-theme="dim"] {
+  --bg: #191e26;
+  --bg2: #1f252e;
+  --bg3: #262d38;
+  --line: #333b47;
+  --line-2: #414b59;
+  --panel: #1e242d;
 
-  --tx: #232a33;
-  --tx2: #5d6b7a;
-  --tx3: #7d8896;
-  --tx-strong: #0e1116;
+  --tx: #dfe4ea;
+  --tx2: #a0aab7;
+  --tx3: #7b8694;
+  --tx-strong: #f2f5f8;
+  --on-solid: #ffffff;
+
+  --up: #2fbf71;
+  --down: #ff5c7a;
+  --accent: #5cb0ff;
+  --accent-hover: #7cc0ff;
+  --accent-soft: #9ed0ff;
+  --accent-bg: rgba(92, 176, 255, .14);
+  --accent-border: #3c6390;
+  --orange: #ffa53d;
+  --purple: #cf93ff;
+  --zone: #ff9a3d;
+
+  --up-bg: #14301f;
+  --up-border: #2b5a3a;
+  --down-bg: #331520;
+  --down-border: #6a2b3d;
+  --warn-bg: #302712;
+  --warn-border: #6a5620;
+
+  --shadow: 0 6px 20px rgba(0, 0, 0, .35);
+  --chart-bg: #191e26;
+  --chart-grid: #242b35;
+}
+
+/* 白天（降低亮度，避免大面积纯白刺眼） */
+[data-theme="light"] {
+  --bg: #e7eaef;
+  --bg2: #f3f5f8;
+  --bg3: #e2e7ee;
+  --line: #ccd4de;
+  --line-2: #b9c3d0;
+  --panel: #f3f5f8;
+
+  --tx: #1e242c;
+  --tx2: #55606d;
+  --tx3: #78828e;
+  --tx-strong: #10141a;
   --on-solid: #ffffff;
 
   --up: #0a8f4d;
-  --down: #d1242f;
-  --accent: #0a66d0;
-  --accent-hover: #0b5bb8;
-  --accent-soft: #0a66d0;
-  --accent-bg: rgba(10, 102, 208, .1);
+  --down: #cf2a35;
+  --accent: #0a5fc8;
+  --accent-hover: #0955b0;
+  --accent-soft: #0a5fc8;
+  --accent-bg: rgba(10, 95, 200, .1);
   --accent-border: #9dc0ea;
-  --orange: #b26a00;
-  --purple: #7b3fbf;
-  --zone: #b26a00;
+  --orange: #a86200;
+  --purple: #7237b3;
+  --zone: #a86200;
 
-  --up-bg: #e6f6ec;
+  --up-bg: #dff2e7;
   --up-border: #a9dbba;
-  --down-bg: #fdeef0;
-  --down-border: #f0b6bd;
-  --warn-bg: #fdf5e2;
-  --warn-border: #e6cf95;
+  --down-bg: #fbe7ea;
+  --down-border: #eeb0b8;
+  --warn-bg: #faf1dc;
+  --warn-border: #e0c88f;
 
-  --shadow: 0 6px 20px rgba(15, 23, 42, .12);
-  --chart-bg: #ffffff;
-  --chart-grid: #eef1f6;
+  --shadow: 0 6px 18px rgba(16, 24, 40, .1);
+  --chart-bg: #f7f9fb;
+  --chart-grid: #e4e9ef;
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -974,9 +1012,11 @@ button { font-family: inherit; }
   transition: color .12s, border-color .12s, background .12s;
 }
 .tb-icon:hover { color: var(--accent); border-color: var(--accent); }
-.tb-icon .ic-moon { display: none; }
-[data-theme="light"] .tb-icon .ic-sun { display: none; }
-[data-theme="light"] .tb-icon .ic-moon { display: block; }
+/* 三档主题各用一个图标 */
+.tb-icon .ic-sun, .tb-icon .ic-moon, .tb-icon .ic-dim { display: none; }
+[data-theme="dark"] .tb-icon .ic-moon { display: block; }
+[data-theme="dim"] .tb-icon .ic-dim { display: block; }
+[data-theme="light"] .tb-icon .ic-sun { display: block; }
 /* ==================================================================
    右栏面板与顶栏的密度修正（2026-11 第二轮）
    ================================================================== */
@@ -1045,3 +1085,71 @@ button { font-family: inherit; }
 
 /* 左栏「展开 / 收起」 */
 .section-toggle { color: var(--tx2); }
+/* ==================================================================
+   交互手感：统一的 hover / active / 滚动条（参考 Coinglass 的轻量反馈）
+   ================================================================== */
+:root { --ease: cubic-bezier(.4, 0, .2, 1); }
+
+button, .tb-btn, .tf-btn, .ptab, .nd-tab, .mini, .btn-tool, .btn-ghost, .btn-chip,
+.btn-ask, .btn-ai, .tb-icon, .trend-card, .deriv-card, .ind-toggle, .event-filters label,
+.chart-tool, .news-locate, .sym-item, .nd-item, .rp-level, .archive-more {
+  transition: background-color .16s var(--ease), border-color .16s var(--ease),
+              color .16s var(--ease), box-shadow .16s var(--ease), transform .1s var(--ease);
+}
+
+button:active, .tb-btn:active, .tf-btn:active, .ptab:active, .nd-tab:active,
+.btn-chip:active, .mini:active, .tb-icon:active, .news-locate:active {
+  transform: translateY(1px);
+}
+
+/* 卡片：hover 时描边提亮，不动布局 */
+.right .panel, .deriv-card, .trend-card, .rp-level, .rp-ext-col, .rp-senti {
+  transition: border-color .16s var(--ease), background-color .16s var(--ease);
+}
+.right .panel:hover, .deriv-card:hover, .trend-card:hover { border-color: var(--line-2); }
+
+/* 分段控件选中态：内描边比实心块更柔和 */
+.tb-btn.active, .tf-btn.active { box-shadow: inset 0 0 0 1px var(--accent-border); }
+
+/* 滚动条 */
+* { scrollbar-width: thin; scrollbar-color: var(--line-2) transparent; }
+::-webkit-scrollbar { width: 9px; height: 9px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--line-2); border-radius: 999px;
+  border: 2px solid transparent; background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover { background: var(--tx3); background-clip: padding-box; }
+
+/* 数字统一等宽，表格对齐更稳 */
+.tbl td, .q-price, .cg-row b, .vol-num, .rp-tbl td { font-variant-numeric: tabular-nums; }
+/* ==================================================================
+   留白与节奏：再收一轮，让面板不那么拥挤
+   ================================================================== */
+.right .panel-title { padding: 9px 11px; font-size: 12px; letter-spacing: .01em; }
+.right .tbl th, .right .tbl td { padding: 4px 5px; }
+.right .panel { padding-bottom: 6px; }
+.cg-liq { padding: 9px 11px 11px; }
+.vol-row { margin-bottom: 4px; }
+
+/* 共振强度：改成圆角轨道条 */
+.cf-bars { gap: 3px; }
+.cf-row { font-size: 11px; }
+.cf-row .bar {
+  position: relative; flex: 1; height: 6px; border-radius: 999px;
+  background: var(--bg3); overflow: hidden;
+}
+.cf-row .bar i {
+  position: absolute; top: 0; bottom: 0; border-radius: 999px;
+}
+.cf-row .bar i.pos { background: var(--up); }
+.cf-row .bar i.neg { background: var(--down); }
+
+/* 左栏信号行稍微松开 */
+.ai-body { padding: 5px 10px 8px; }
+.sig-row { padding: 4px 6px; border-radius: 6px; }
+
+/* 底部周期卡片 */
+.trend-strip { gap: 8px; padding: 7px 10px; }
+.trend-card { padding: 7px 10px; border-radius: 8px; }
+.trend-card .tc-tf { font-size: 12px; letter-spacing: .02em; }

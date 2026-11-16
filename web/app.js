@@ -2573,11 +2573,18 @@ function startPolling() {
 
 /* ---------------------------------------------------------------- 主题 */
 const THEME_KEY = "panshi-theme";
+const THEMES = ["dark", "dim", "light"];
+const THEME_LABEL = { dark: "夜晚", dim: "暗灰", light: "白天" };
 
 function currentTheme() {
   const root = document && document.documentElement;
   const t = root && root.dataset ? root.dataset.theme : "";
-  return t === "light" ? "light" : "dark";
+  return THEMES.includes(t) ? t : "dark";
+}
+
+function nextTheme(name) {
+  const i = THEMES.indexOf(name);
+  return THEMES[(i + 1) % THEMES.length];
 }
 
 function initTheme() {
@@ -2589,21 +2596,22 @@ function initTheme() {
 }
 
 function applyTheme(name, save) {
+  const theme = THEMES.includes(name) ? name : "dark";
   const root = document && document.documentElement;
-  if (root && root.dataset) root.dataset.theme = name === "light" ? "light" : "dark";
+  if (root && root.dataset) root.dataset.theme = theme;
   if (save) {
-    try { localStorage.setItem(THEME_KEY, name); } catch (e) { /* ignore */ }
+    try { localStorage.setItem(THEME_KEY, theme); } catch (e) { /* ignore */ }
   }
   const btn = $("btnTheme");
   if (btn) {
-    btn.title = currentTheme() === "light" ? "切换到夜晚模式" : "切换到白天模式";
+    btn.title = `当前：${THEME_LABEL[theme]} · 点击切换到${THEME_LABEL[nextTheme(theme)]}`;
     if (btn.setAttribute) btn.setAttribute("aria-label", btn.title);
   }
   applyChartTheme();
 }
 
 function toggleTheme() {
-  applyTheme(currentTheme() === "light" ? "dark" : "light", true);
+  applyTheme(nextTheme(currentTheme()), true);
 }
 
 /** 主题切换后要同步 lightweight-charts 的配色（它不吃 CSS 变量） */

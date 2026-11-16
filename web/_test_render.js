@@ -735,24 +735,26 @@ const text = id => document.getElementById(id).textContent;
     return "金额/笔数/占比条/分时窗口 + 降级提示";
   });
 
-  run("主题：双主题变量与切换按钮齐备", () => {
+  run("主题：三档变量与切换按钮齐备", () => {
     const css = fs.readFileSync(path.join(__dirname, "styles.css"), "utf8");
     const html = fs.readFileSync(path.join(__dirname, "index.html"), "utf8");
     const js = fs.readFileSync(path.join(__dirname, "app.js"), "utf8");
-    if (!css.includes('[data-theme="light"]')) throw new Error("缺少浅色主题变量块");
+    for (const theme of ["dark", "dim", "light"]) {
+      if (!css.includes(`[data-theme="${theme}"]`)) throw new Error("缺少主题块 " + theme);
+    }
     for (const token of ["--chart-bg", "--tx-strong", "--panel", "--on-solid"]) {
       if (!css.includes(token)) throw new Error("缺少主题变量 " + token);
     }
-    if (css.indexOf('[data-theme="light"]') === css.lastIndexOf('[data-theme="light"]')) {
-      // 至少要有变量块 + 局部覆盖块
-      throw new Error("浅色主题覆盖不足");
-    }
     if (!html.includes('id="btnTheme"')) throw new Error("顶部缺少主题按钮");
-    for (const fn of ["function applyTheme", "function toggleTheme", "function applyChartTheme"]) {
+    for (const icon of ["ic-sun", "ic-moon", "ic-dim"]) {
+      if (!html.includes(icon)) throw new Error("缺少主题图标 " + icon);
+    }
+    for (const fn of ["function applyTheme", "function toggleTheme", "function nextTheme"]) {
       if (!js.includes(fn)) throw new Error("缺少 " + fn);
     }
+    if (!js.includes('const THEMES = ["dark", "dim", "light"]')) throw new Error("主题顺序不对");
     if (!js.includes("panshi-theme")) throw new Error("主题没有持久化 key");
-    return "浅色变量 + 图表变量 + 按钮 + 持久化";
+    return "夜晚 / 暗灰 / 白天 三档 + 图标 + 持久化";
   });
 
   run("事件与K线下标映射（日级/分钟级）", () => {    const times = [Date.UTC(2026, 10, 10) / 1000, Date.UTC(2026, 10, 11) / 1000, Date.UTC(2026, 10, 12) / 1000];
