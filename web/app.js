@@ -1266,12 +1266,10 @@ async function loadChart(keepView) {
 async function loadHealth() {
   try {
     const h = await api("/api/health");
-    const direct = h.transport === "direct";
-    $("hdrTransport").textContent = direct ? "直连" : "代理";
-    $("hdrTransport").title = direct
-      ? `行情直连 Binance（没有中转）\n缓存 ${h.cache} 项 · 累计请求 ${h.requests} 次`
-      : `本机直连 Binance 被阻断，行情经 127.0.0.1:7897 代理转发\n缓存 ${h.cache} 项 · 累计请求 ${h.requests} 次`;
-    $("hdrTransport").classList.toggle("warn", !direct);
+    // 通道（直连/代理）不再占顶栏，留着给排查用：控制台输 __health 即可看到
+    window.__health = h;
+    const stale = $("hdrStale");
+    if (stale) stale.hidden = !h.stale;
   } catch (e) { /* ignore */ }
 }
 
