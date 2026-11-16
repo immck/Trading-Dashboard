@@ -98,9 +98,10 @@ function initCharts() {
   const m = $("mainChart"), s = $("subChart");
   state.mainChart = LightweightCharts.createChart(m, Object.assign(themeOpts(),
     { width: m.clientWidth, height: m.clientHeight }));
+  const upC = cssVar("--up", C.up), downC = cssVar("--down", C.down);
   state.candleSeries = state.mainChart.addCandlestickSeries({
-    upColor: C.up, downColor: C.down, borderVisible: false,
-    wickUpColor: C.up, wickDownColor: C.down, priceLineColor: "#4da6ff88",
+    upColor: upC, downColor: downC, borderVisible: false,
+    wickUpColor: upC, wickDownColor: downC, priceLineColor: cssVar("--accent", "#4da6ff") + "88",
   });
   state.volSeries = state.mainChart.addHistogramSeries({
     priceScaleId: "vol", priceFormat: { type: "volume" },
@@ -456,7 +457,7 @@ function renderChart() {
   state.mainChart.applyOptions({rightPriceScale:{mode:state.eventMapMode && mapSettings.log ? 1 : 0, scaleMargins:{top:state.eventMapMode ? .32 : .06,bottom:.16}}});
   state.volSeries.setData(t.map((time, i) => ({
     time, value: d.bars.volume[i],
-    color: d.bars.close[i] >= d.bars.open[i] ? "#00b95630" : "#ff497630",
+    color: (d.bars.close[i] >= d.bars.open[i] ? cssVar("--up", "#00b956") : cssVar("--down", "#ff4976")) + "30",
   })));
 
   clearOverlays();
@@ -2621,8 +2622,9 @@ function applyChartTheme() {
   state.mainChart.applyOptions(opts);
   if (state.subChart) state.subChart.applyOptions(opts);
   if (state.candleSeries) {
+    const upC = cssVar("--up", C.up), downC = cssVar("--down", C.down);
     state.candleSeries.applyOptions({
-      upColor: C.up, downColor: C.down, wickUpColor: C.up, wickDownColor: C.down,
+      upColor: upC, downColor: downC, wickUpColor: upC, wickDownColor: downC,
     });
   }
   if (state.chartData) {

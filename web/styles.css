@@ -53,7 +53,7 @@
   --tx: #dfe4ea;
   --tx2: #a0aab7;
   --tx3: #7b8694;
-  --tx-strong: #f2f5f8;
+  --tx-strong: #e8edf3;
   --on-solid: #ffffff;
 
   --up: #2fbf71;
@@ -81,21 +81,21 @@
 
 /* 白天（降低亮度，避免大面积纯白刺眼） */
 [data-theme="light"] {
-  --bg: #e7eaef;
-  --bg2: #f3f5f8;
-  --bg3: #e2e7ee;
-  --line: #ccd4de;
-  --line-2: #b9c3d0;
-  --panel: #f3f5f8;
+  --bg: #e8e5df;
+  --bg2: #f3f1ec;
+  --bg3: #dedad2;
+  --line: #d0ccc3;
+  --line-2: #bfbab0;
+  --panel: #f3f1ec;
 
-  --tx: #1e242c;
-  --tx2: #55606d;
-  --tx3: #78828e;
-  --tx-strong: #10141a;
+  --tx: #2c3036;
+  --tx2: #5f666e;
+  --tx3: #838a92;
+  --tx-strong: #1b1e23;
   --on-solid: #ffffff;
 
-  --up: #0a8f4d;
-  --down: #cf2a35;
+  --up: #1c8a52;
+  --down: #c2404b;
   --accent: #0a5fc8;
   --accent-hover: #0955b0;
   --accent-soft: #0a5fc8;
@@ -112,9 +112,9 @@
   --warn-bg: #faf1dc;
   --warn-border: #e0c88f;
 
-  --shadow: 0 6px 18px rgba(16, 24, 40, .1);
-  --chart-bg: #f7f9fb;
-  --chart-grid: #e4e9ef;
+  --shadow: 0 6px 18px rgba(40, 36, 28, .1);
+  --chart-bg: #f7f5f0;
+  --chart-grid: #e6e2da;
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
