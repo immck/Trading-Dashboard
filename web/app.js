@@ -222,18 +222,39 @@ function lowerBound(times, ts) {
   return lo;
 }
 
-async function loadEvents() {
+function readLocalFeed(key) {
   try {
-    // 只请求已勾选的分类，未勾的（默认含「行业」）在服务端就过滤掉，省带宽
-    const off = EVENT_CATEGORIES.map(([id]) => id).filter(id => !enabledEventCategories.has(id));
-    const d = await api(`/api/events?symbol=${apiSym()}&exclude=${off.join(",")}`);
+    const entry = JSON.parse(localStorage.getItem("panshi:feeds:v1:" + key));
+    return entry && Date.now() - entry.at < 7 * 86400000 ? entry.data : null;
+  } catch (e) { return null; }
+}
+
+function writeLocalFeed(key, data) {
+  try {
+    localStorage.setItem("panshi:feeds:v1:" + key, JSON.stringify({ at: Date.now(), data }));
+  } catch (e) { /* Storage can be disabled or full. */ }
+}
+
+async function loadEvents() {
+  const off = EVENT_CATEGORIES.map(([id]) => id).filter(id => !enabledEventCategories.has(id));
+  const path = `/api/events?symbol=${apiSym()}&exclude=${off.join(",")}`;
+  const apply = d => {
     state.events = d.events || [];
     state.eventTypes = d.types || {};
     renderMapArchive();
     renderEventLegend();
     scheduleEvents();
     if (state.eventMapMode && state.chartData) updateEventMapStats(state.chartData);
+  };
+  const cached = readLocalFeed(path);
+  if (cached) apply(cached);
+  try {
+    // 只请求已勾选的分类，未勾的（默认含「行业」）在服务端就过滤掉，省带宽
+    const d = await api(path);
+    writeLocalFeed(path, d);
+    if (path === `/api/events?symbol=${apiSym()}&exclude=${EVENT_CATEGORIES.map(([id]) => id).filter(id => !enabledEventCategories.has(id)).join(",")}`) apply(d);
   } catch (e) {
+    if (cached) return;
     state.events = [];
     $("evLegend").textContent = "事件加载失败";
     scheduleEvents();
@@ -2281,12 +2302,19 @@ function handleAiEvent(obj) {
 /* ---------------------------------------------------------------- 实时快讯 */
 let newsRetry = 0;
 async function loadNews() {
+  const tag = state.newsTag;
+  const path = `/api/news?tag=${tag}&limit=80`;
+  const cached = readLocalFeed(path);
+  if (cached) renderNews(cached);
   try {
-    const d = await api(`/api/news?tag=${state.newsTag}&limit=80`);
-    renderNews(d);
+    const d = await api(path);
+    if (state.newsTag !== tag) return;
+    if (d.items && d.items.length) writeLocalFeed(path, d);
+    if (!d.warming || !cached) renderNews(d);
     if (d.warming && newsRetry < 3) { newsRetry++; setTimeout(loadNews, 4000); }
     else if (!d.warming) newsRetry = 0;
   } catch (e) {
+    if (cached || state.newsTag !== tag) return;
     $("newsBody").innerHTML = `<div class="nd-empty">快讯加载失败：${escapeHtml(e.message)}</div>`;
   }
 }

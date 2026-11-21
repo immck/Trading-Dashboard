@@ -8,6 +8,7 @@ from __future__ import annotations
 import email.utils
 import hashlib
 import json
+import os
 import re
 import time
 import threading
@@ -23,6 +24,27 @@ _cache: dict[str, tuple[float, list]] = {}
 _translation_cache: dict[str, str] = {}
 _translation_lock = threading.Lock()
 _translation_running = False
+_DISK_CACHE = os.path.join(C.DATA_DIR, "news_cache.json")
+
+
+def _restore_cache():
+    try:
+        with open(_DISK_CACHE, encoding="utf-8") as fh:
+            data = json.load(fh)
+        at = float(data["at"])
+        items = data["items"]
+        if not isinstance(items, list) or not all(
+            isinstance(row, dict) and all(k in row for k in ("id", "ts", "title", "tag", "source"))
+            and isinstance(row["ts"], (int, float)) for row in items
+        ):
+            return
+        if 0 <= time.time() - at < 7 * 86400:
+            _cache["__all__"] = (at, items)
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
+
+
+_restore_cache()
 
 _TAG_RE = re.compile(r"<[^>]+>")
 _SPACE_RE = re.compile(r"\s+")
@@ -348,6 +370,14 @@ def _store(items: list[dict], errs: list[dict]) -> list[dict]:
         uniq.append(it)
     _cache["__all__"] = (time.time(), uniq)
     _cache["__errors__"] = (time.time(), errs)
+    try:
+        os.makedirs(C.DATA_DIR, exist_ok=True)
+        tmp = _DISK_CACHE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump({"at": time.time(), "items": uniq}, fh, ensure_ascii=False)
+        os.replace(tmp, _DISK_CACHE)
+    except (OSError, TypeError, ValueError):
+        pass
     _archive_news(uniq)
     return uniq
 
@@ -410,7 +440,7 @@ def fetch(tag: str = "all", limit: int = 60) -> dict:
     started = _start_refresh()
 
     # 有旧数据：立刻返回，不等待刷新
-    if hit and hit[1] and age < STALE_TTL:
+    if hit and hit[1] and age < max(STALE_TTL, 7 * 86400):
         return _payload(hit[1], errs, tag, limit)
 
     # 完全没有可用数据：最多等 FIRST_WAIT 秒

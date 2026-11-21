@@ -5,7 +5,13 @@
 """
 from __future__ import annotations
 
+import json
+import os
+import time
 from concurrent.futures import ThreadPoolExecutor
+
+import json
+import os
 
 import numpy as np
 
@@ -458,6 +464,35 @@ def _snapshot_us(sym: str) -> dict:
 
 # ---------------------------------------------------------------- 汇总
 _down_until = 0.0
+_SNAP_DIR = os.path.join(C.DATA_DIR, "snapshot_cache")
+_snap_written: dict[str, float] = {}
+
+
+def _persist_snapshot(base: str, data: dict) -> None:
+    """把成功的快照落盘：重启或断网时还能拿它兜底。"""
+    now = time.time()
+    if now - _snap_written.get(base, 0.0) < 60:
+        return
+    _snap_written[base] = now
+    try:
+        os.makedirs(_SNAP_DIR, exist_ok=True)
+        path = os.path.join(_SNAP_DIR, f"{base}.json")
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump({"at": now, "data": data}, fh, ensure_ascii=False)
+    except (OSError, TypeError, ValueError):
+        pass
+
+
+def _load_snapshot(base: str):
+    try:
+        with open(os.path.join(_SNAP_DIR, f"{base}.json"), encoding="utf-8") as fh:
+            blob = json.load(fh)
+        data = dict(blob["data"])
+        data["stale"] = True
+        data["stale_age_s"] = int(time.time() - float(blob["at"]))
+        return data
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
 
 
 def snapshot(symbol: str) -> dict:
@@ -478,6 +513,9 @@ def snapshot(symbol: str) -> dict:
             stale["stale"] = True
             stale["stale_age_s"] = int(now - hit[0])
             return stale
+        disk = _load_snapshot(base)
+        if disk:
+            return disk
         raise RuntimeError("行情通道不可用（网络中断），稍后自动重试")
 
     pair = f"{base}{C.QUOTE}"
@@ -536,6 +574,9 @@ def snapshot(symbol: str) -> dict:
             stale["stale"] = True
             stale["stale_age_s"] = int(now - cached[0])
             return stale
+        disk = _load_snapshot(base)
+        if disk:
+            return disk
         raise RuntimeError("拿不到价格")
 
     best_bid = depth["bids"][0][0] if depth["bids"] else None
@@ -605,4 +646,5 @@ def snapshot(symbol: str) -> dict:
         "ts": int(now * 1000),
     }
     _cache[key] = (now, out)
+    _persist_snapshot(base, out)
     return out
